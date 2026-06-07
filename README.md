@@ -30,7 +30,7 @@
 
 This project builds a **5-layer AI-powered Network Intrusion Detection System (NIDS)** that replaces manual SOC triage with an intelligent reasoning agent. When a threat alert fires, the agent:
 
-1. Queries four **MCP servers** (Zeek, Suricata, Wazuh, MITRE ATT&CK) for evidence
+1. Queries four **MCP servers** (Zeek, Suricata, Wazuh, MITRE ATT&CK) for evidence via local stdio child processes
 2. Applies **AI reasoning** (Google Gemini) to synthesize cross-sensor findings
 3. Maps the threat to a **MITRE ATT&CK technique**
 4. Returns a **structured JSON decision** with confidence score and recommended action
@@ -73,11 +73,11 @@ This project builds a **5-layer AI-powered Network Intrusion Detection System (N
 ┌─────────────────────────────────────────────────────────────────────┐
 │  LAYER 4 — INTELLIGENCE  (this repo)                                │
 │                                                                     │
-│   AI SOC Agent  ←→  MCP Hub                                         │
-│   (Gemini LLM)       ├── zeek-mcp    (25 tools)                     │
-│                      ├── suricata-mcp (36 tools)                    │
-│                      ├── wazuh-mcp   (28 tools)                     │
-│                      └── mitre-mcp   (39 tools)                     │
+│   AI SOC Agent  ←→  MCP Hub (stdio)                               │
+│   (Gemini LLM)       ├── zeek-mcp    (16 tools)                     │
+│                      ├── suricata-mcp (18 tools)                    │
+│                      ├── wazuh-mcp   (11 tools)                     │
+│                      └── mitre-mcp   (9 tools)                      │
 │                                                                     │
 │   Two-Phase Investigation:                                          │
 │   Fast Path  → Wazuh + MITRE  (~3s)   → confidence ≥80 or <40      │
@@ -121,10 +121,10 @@ Final-Year-Gradution-Project-/
 │   │   └── types.ts        #   Zod-validated decision schema
 │   └── .env.example
 │
-├── zeek-mcp/               # 🦎 Zeek behavioral analysis (25 tools)
-├── suricata-mcp/           # 🔥 Suricata signature IDS (36 tools)
-├── wazuh-mcp/              # 🛡️  Wazuh SIEM aggregation (28 tools)
-├── mitre-mcp/              # 🎯 MITRE ATT&CK intelligence (39 tools)
+├── zeek-mcp/               # 🦎 Zeek behavioral analysis (16 tools)
+├── suricata-mcp/           # 🔥 Suricata signature IDS (18 tools)
+├── wazuh-mcp/              # 🛡️  Wazuh SIEM aggregation (11 tools)
+├── mitre-mcp/              # 🎯 MITRE ATT&CK intelligence (9 tools)
 │
 ├── docs/
 │   └── architecture.md     # Detailed architecture documentation
@@ -143,10 +143,10 @@ Final-Year-Gradution-Project-/
 | Component | Role | Tools | Tech |
 |---|---|---|---|
 | [ai-soc-agent](./ai-soc-agent/) | AI reasoning + orchestration | — | TypeScript, Gemini, Express |
-| [zeek-mcp](./zeek-mcp/) | Behavioral network analysis | 25 | TypeScript, MCP SDK |
-| [suricata-mcp](./suricata-mcp/) | Signature-based IDS alerts | 36 | TypeScript, MCP SDK |
-| [wazuh-mcp](./wazuh-mcp/) | SIEM event aggregation | 28 | TypeScript, MCP SDK |
-| [mitre-mcp](./mitre-mcp/) | Threat intelligence (ATT&CK) | 39 | TypeScript, MCP SDK |
+| [zeek-mcp](./zeek-mcp/) | Behavioral network analysis | 16 | TypeScript, MCP SDK |
+| [suricata-mcp](./suricata-mcp/) | Signature-based IDS alerts | 18 | TypeScript, MCP SDK |
+| [wazuh-mcp](./wazuh-mcp/) | SIEM event aggregation | 11 | TypeScript, MCP SDK |
+| [mitre-mcp](./mitre-mcp/) | Threat intelligence (ATT&CK) | 9 | TypeScript, MCP SDK |
 
 ---
 
@@ -247,7 +247,7 @@ The full lab environment is documented in [`NIDS_Full_Milestone_Guide.md`](./NID
 |---|---|---|---|---|
 | pfSense | VMware | pfSense 2.7 | `192.168.80.10` | Firewall / VLAN / SPAN |
 | Zeek + Suricata | VMware | Ubuntu 22.04 | `192.168.80.11` | Detection engines |
-| MCP Servers | VMware | Ubuntu 22.04 | `192.168.80.12` | 4 MCP servers (ports 3001–3004) |
+| AI SOC Agent | VMware | Ubuntu 22.04 | `192.168.80.12` | Node.js stdio MCP client |
 | DVWA | VMware | Ubuntu 22.04 | `192.168.80.13` | Attack target (DMZ) |
 | Windows Client | VMware | Windows 10 | `192.168.80.14` | Insider threat simulation |
 | Wazuh | Azure | Ubuntu 22.04 | `100.64.0.2` | SIEM |
@@ -295,10 +295,10 @@ Hybrid connectivity uses **Tailscale** (WireGuard mesh) — the laptop advertise
 | [`docs/architecture.md`](./docs/architecture.md) | In-depth architecture with design rationale |
 | [`docs/deployment.md`](./docs/deployment.md) | Lab, Docker Compose, and production deployment |
 | [`ai-soc-agent/README.md`](./ai-soc-agent/README.md) | Agent setup, API reference, response schema |
-| [`zeek-mcp/README.md`](./zeek-mcp/README.md) | Zeek MCP: 25 tools, configuration, test data |
-| [`suricata-mcp/README.md`](./suricata-mcp/README.md) | Suricata MCP: 36 tools, EVE JSON parser |
-| [`wazuh-mcp/README.md`](./wazuh-mcp/README.md) | Wazuh MCP: 28 tools, dual-API design |
-| [`mitre-mcp/README.md`](./mitre-mcp/README.md) | MITRE MCP: 39 tools, offline STIX cache |
+| [`zeek-mcp/README.md`](./zeek-mcp/README.md) | Zeek MCP: 16 tools, configuration, test data |
+| [`suricata-mcp/README.md`](./suricata-mcp/README.md) | Suricata MCP: 18 tools, EVE JSON parser |
+| [`wazuh-mcp/README.md`](./wazuh-mcp/README.md) | Wazuh MCP: 11 tools, dual-API design |
+| [`mitre-mcp/README.md`](./mitre-mcp/README.md) | MITRE MCP: 9 tools, offline STIX cache |
 
 ---
 

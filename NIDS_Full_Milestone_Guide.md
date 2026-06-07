@@ -73,7 +73,7 @@ pfSense  Telegram  Wazuh
 | Confidence | Path | Action | Avg Time |
 |---|---|---|---|
 | ≥ 80% | Fast Path | `auto-block` | ~3 seconds |
-| 40–79% | Deep Path | `analyst-review` or `auto-block` | ~8 seconds |
+| 40–79% | Deep Path | `analyst-review` | ~8 seconds |
 | < 40% | Fast Path | `monitor` | ~3 seconds |
 
 ### MCP Server Roles
@@ -203,15 +203,22 @@ VLAN 30  →  Parent: em1  →  Tag: 30  →  Description: MGMT
 Add interface em2 → rename to SPAN
 Interfaces → SPAN → Enable → Static IP → 192.168.80.50/24
 
-Then: Firewall → Traffic Shaper → Limiters
-  → Not needed. Use pfSense bridge mirror instead:
+SPAN Mirror Setup (for Zeek/Suricata packet capture):
 
-Interfaces → Bridges → Add
-  → Member interfaces: LAN, DMZ, WAN
-  → Enable Span port: SPAN (em2)
-  → Save
+Method 1 - Dedicated NIC (Recommended):
+ 1. Add a 3rd NIC to the pfSense VM (em2)
+ 2. In VMware: Edit VM Settings → Network Adapter 3
+    → Connect to: Host-only or Custom (VMnet)
+    → Promiscuous Mode: Accept
+ 3. In pfSense WebGUI: Interfaces → Assignments
+    → Add em2, enable it, name it "SPAN"
+ 4. Connect Zeek/Suricata VM to this same VMnet
+ 5. Zeek/Suricata will see all traffic on this interface
 
-Zeek/Suricata VM listens on the interface connected to em2.
+Method 2 - Port Mirroring (if using managed switch):
+  → Configure switch SPAN port to mirror traffic to the Zeek VM port
+
+⚠️  The bridge method described in older guides does NOT create a true SPAN mirror for IDS. Zeek and Suricata must see raw packets.
 ```
 
 **Firewall rules (Firewall → Rules):**
@@ -287,7 +294,7 @@ sudo nano /opt/zeek/share/zeek/site/local.zeek
 @load policy/protocols/dns/detect-external-names
 @load policy/frameworks/notice/weird
 @load policy/misc/detect-traceroute
-@load frameworks/files/hash-all-files
+@load policy/frameworks/files/hash-all-files
 ```
 
 ```bash
@@ -452,8 +459,8 @@ curl http://100.64.0.3:3000/health
 # Minimum: 4 CPU / 8 GB RAM / 100 GB disk
 
 # Download Wazuh installer
-curl -sO https://packages.wazuh.com/4.7/wazuh-install.sh
-curl -sO https://packages.wazuh.com/4.7/config.yml
+curl -sO https://packages.wazuh.com/4.x/wazuh-install.sh
+curl -sO https://packages.wazuh.com/4.x/config.yml
 
 # Edit config.yml with your server details
 nano config.yml
@@ -494,41 +501,43 @@ sudo /var/ossec/bin/manage_agents
 
 # On 192.168.80.11 (Zeek VM) — install agent
 curl -so wazuh-agent.deb \
-  https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_4.7.0-1_amd64.deb
+  "https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/$(curl -s https://packages.wazuh.com/4.x/apt/dists/stable/main/binary-amd64/Packages | grep -m1 'Filename:.*wazuh-agent.*amd64.deb' | awk '{print $2}' | xargs basename)"
 sudo WAZUH_MANAGER='100.64.0.2' dpkg -i ./wazuh-agent.deb
 sudo systemctl daemon-reload
 sudo systemctl enable wazuh-agent
 sudo systemctl start wazuh-agent
 ```
 
-**Configure Filebeat to ship Suricata eve.json to Wazuh:**
-```bash
-# On 192.168.80.11 (Zeek VM)
-sudo nano /var/ossec/etc/ossec.conf
-```
+# Download specific Wazuh agent version (check https://packages.wazuh.com for latest)
+wget https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_4.9.2-1_amd64.deb
 
-```xml
-<!-- Add inside <ossec_config> -->
+# Install with Wazuh manager IP
+sudo WAZUH_MANAGER='100.64.0.2' dpkg -i wazuh-agent_4.9.2-1_amd64.deb
+
+# Alternative: Use Wazuh deployment wizard
+# 1. Open Wazuh Dashboard → Agents → Deploy new agent
+# 2. Select OS (Debian/Ubuntu)
+# 3. Copy the generated command and run it
+
+# Edit Wazuh agent configuration
+sudo nano /var/ossec/etc/ossec.conf
+
+# Add these localfile entries inside <ossec_config>:
 <localfile>
   <log_format>json</log_format>
   <location>/var/log/suricata/eve.json</location>
 </localfile>
 
 <localfile>
-  <log_format>zeek</log_format>
+  <log_format>syslog</log_format>
   <location>/opt/zeek/logs/current/conn.log</location>
 </localfile>
 
+# For Zeek JSON logs (if using json format):
 <localfile>
-  <log_format>zeek</log_format>
-  <location>/opt/zeek/logs/current/http.log</location>
+  <log_format>json</log_format>
+  <location>/opt/zeek/logs/current/*.log</location>
 </localfile>
-
-<localfile>
-  <log_format>zeek</log_format>
-  <location>/opt/zeek/logs/current/dns.log</location>
-</localfile>
-```
 
 ```bash
 sudo systemctl restart wazuh-agent
@@ -594,14 +603,14 @@ alert tcp any any -> $HOME_NET 22 (
 # MITRE: T1190 — Exploit Public-Facing Application
 # Test with: sqlmap -u "http://192.168.80.13/login.php" --forms --batch
 alert http any any -> $HTTP_SERVERS any (
-  msg:"CUSTOM SQL INJECTION ATTEMPT";
-  flow:established,to_server;
-  http.uri;
-  pcre:"/(\%27|\'|(\%3D)|(=))[^\n]*((\%27|\')|(\-\-)|(\%3B)|(;))/i";
-  classtype:web-application-attack;
-  sid:9000002;
-  rev:1;
-  metadata:mitre_technique T1190;
+ msg:"CUSTOM SQL INJECTION ATTEMPT";
+ flow:established,to_server;
+ http.uri; content:"union"; fast_pattern; nocase;
+ http.uri; pcre:"/union\s+select/i";
+ classtype:web-application-attack;
+ sid:9000002;
+ rev:1;
+ metadata:mitre_technique T1190;
 )
 
 # ── RULE 3: DDoS SYN FLOOD ───────────────────────────────────────
@@ -682,79 +691,53 @@ sudo nano /var/ossec/etc/rules/local_rules.xml
 ```
 
 ```xml
-<!-- /var/ossec/etc/rules/local_rules.xml -->
 <group name="custom_nids,">
-
-  <!-- RULE 1: SSH Brute Force -->
-  <!-- Fires when 5+ SSH failures from same IP in 60 seconds -->
-  <!-- MITRE T1110.001: Brute Force: Password Guessing -->
+  <!-- SSH Brute Force -->
   <rule id="100001" level="10" frequency="5" timeframe="60">
-    <if_matched_group>authentication_failed</if_matched_group>
+    <if_matched_sid>5716</if_matched_sid>
     <same_source_ip />
     <description>SSH Brute Force: 5+ failed logins from $(srcip) in 60s</description>
-    <options>no_full_log</options>
     <group>authentication_failures,pci_dss_11.4,mitre_t1110.001,</group>
-    <mitre>
-      <id>T1110.001</id>
-    </mitre>
   </rule>
 
-  <!-- RULE 2: Web Application Attack (SQLi/XSS) -->
-  <!-- Fires on Suricata web attack SIDs -->
-  <rule id="100002" level="12">
-    <if_sid>86600</if_sid>
-    <field name="alert.category">Web Application Attack</field>
-    <description>Web Application Attack detected: $(alert.signature) from $(srcip)</description>
+  <!-- SQL Injection -->
+  <rule id="100002" level="6">
+    <if_sid>31101</if_sid>
+    <field name="alert.signature">SQL Injection</field>
+    <description>Web Application Attack: $(alert.signature) from $(srcip)</description>
     <group>web_attack,pci_dss_6.6,mitre_t1190,</group>
-    <mitre>
-      <id>T1190</id>
-    </mitre>
   </rule>
 
-  <!-- RULE 3: C2 Beaconing -->
-  <!-- Fires on Suricata C2/trojan-activity category -->
-  <rule id="100003" level="13">
-    <if_sid>86600</if_sid>
-    <field name="alert.category">Trojan Activity</field>
+  <!-- C2 Beaconing -->
+  <rule id="100003" level="6">
+    <if_sid>31101</if_sid>
+    <field name="alert.signature">C2 Beaconing</field>
     <description>C2 Beaconing detected from $(srcip): $(alert.signature)</description>
     <group>malware,c2_beacon,pci_dss_11.4,mitre_t1071.004,</group>
-    <mitre>
-      <id>T1071.004</id>
-    </mitre>
   </rule>
 
-  <!-- RULE 4: DDoS Detection -->
-  <!-- Fires on Suricata denial-of-service category -->
-  <rule id="100004" level="10">
-    <if_sid>86600</if_sid>
-    <field name="alert.category">Denial of Service Attack</field>
+  <!-- DDoS -->
+  <rule id="100004" level="6">
+    <if_sid>31101</if_sid>
+    <field name="alert.signature">DDoS</field>
     <description>DDoS attack detected from $(srcip): $(alert.signature)</description>
     <group>ddos,availability,mitre_t1498,</group>
-    <mitre>
-      <id>T1498</id>
-    </mitre>
   </rule>
 
-  <!-- RULE 5: Lateral Movement / Internal Scan -->
-  <!-- Fires on Suricata network-scan category from internal IP -->
-  <rule id="100005" level="11">
-    <if_sid>86600</if_sid>
-    <field name="alert.category">Network Scan</field>
+  <!-- Lateral Movement -->
+  <rule id="100005" level="6">
+    <if_sid>31101</if_sid>
+    <field name="alert.signature">Lateral Movement</field>
     <description>Internal lateral movement scan from $(srcip): $(alert.signature)</description>
     <group>lateral_movement,pci_dss_11.2,mitre_t1046,</group>
-    <mitre>
-      <id>T1046</id>
-    </mitre>
   </rule>
 
-  <!-- RULE 6: High Severity Composite — fires Wazuh webhook -->
-  <!-- Aggregates any rule 100001-100005 for webhook trigger -->
-  <rule id="100010" level="15" frequency="1" timeframe="10">
-    <if_matched_rule_id>100001,100002,100003,100004,100005</if_matched_rule_id>
-    <description>HIGH SEVERITY NIDS EVENT: $(rule.description) — Triggering SOAR</description>
+  <!-- High Severity SOAR Trigger -->
+  <rule id="100010" level="10">
+    <if_matched_group>custom_nids</if_matched_group>
+    <description>HIGH SEVERITY NIDS EVENT — Triggering SOAR</description>
     <group>soar_trigger,high_severity,</group>
   </rule>
-
 </group>
 ```
 
@@ -774,6 +757,75 @@ sudo /var/ossec/bin/ossec-logtest -V | grep "Rules loaded"
 ```
 
 **Configure Wazuh webhook (to trigger n8n):**
+
+Wazuh's `<integration>` block with `<name>custom-webhook</name>` requires an executable script at `/var/ossec/integrations/custom-webhook`. Create it first:
+
+```bash
+sudo tee /var/ossec/integrations/custom-webhook << 'SCRIPT'
+#!/usr/bin/env python3
+# /var/ossec/integrations/custom-webhook
+# Wazuh → n8n webhook integration
+
+import sys
+import json
+import os
+import requests
+import logging
+from datetime import datetime
+
+# Setup logging
+log_file = "/var/ossec/logs/integrations.log"
+logging.basicConfig(filename=log_file, level=logging.INFO, 
+                    format='%(asctime)s - %(levelname)s - %(message)s')
+
+def main():
+    try:
+        # Read alert from stdin (Wazuh passes alert as argument 3)
+        alert_file = sys.argv[3] if len(sys.argv) > 3 else None
+        if not alert_file or not os.path.exists(alert_file):
+            logging.error(f"Alert file not found: {alert_file}")
+            sys.exit(1)
+
+        with open(alert_file, 'r') as f:
+            alert_json = json.load(f)
+
+        # n8n webhook URL
+        hook_url = "http://100.64.0.3:5678/webhook/soc-alert"
+
+        # Send to n8n with timeout and retry
+        for attempt in range(3):
+            try:
+                response = requests.post(
+                    hook_url,
+                    json=alert_json,
+                    timeout=10,
+                    headers={"Content-Type": "application/json"}
+                )
+                response.raise_for_status()
+                logging.info(f"Webhook sent successfully: {response.status_code}")
+                sys.exit(0)
+            except requests.exceptions.RequestException as e:
+                logging.warning(f"Webhook attempt {attempt + 1} failed: {e}")
+                if attempt < 2:
+                    import time
+                    time.sleep(2 ** attempt)  # Exponential backoff
+
+        logging.error("All webhook attempts failed")
+        sys.exit(1)
+
+    except Exception as e:
+        logging.error(f"Integration error: {e}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+SCRIPT
+sudo chmod 750 /var/ossec/integrations/custom-webhook
+sudo chown root:wazuh /var/ossec/integrations/custom-webhook
+```
+
+Then add the integration config:
+
 ```bash
 sudo nano /var/ossec/etc/ossec.conf
 ```
@@ -783,7 +835,7 @@ sudo nano /var/ossec/etc/ossec.conf
 <integration>
   <name>custom-webhook</name>
   <hook_url>http://100.64.0.3:5678/webhook/wazuh-alert</hook_url>
-  <level>12</level>
+  <level>10</level>
   <rule_id>100001,100002,100003,100004,100005,100010</rule_id>
   <alert_format>json</alert_format>
 </integration>
@@ -938,7 +990,50 @@ WAZUH_INDEXER_VERIFY_SSL=false
 MITRE_MATRICES=enterprise
 ```
 
-Important: because the MCP servers are stdio children, they read local paths from the machine where `ai-soc-agent` runs. If Zeek and Suricata run on `192.168.80.11` but the agent runs on `100.64.0.3`, mount the sensor logs onto the agent VM over NFS, SSHFS, or another read-only sync mechanism and point `ZEEK_LOG_DIR` / `SURICATA_EVE_LOG` to those mounted paths.
+Important: because the MCP servers are stdio children, they read local paths from the machine where `ai-soc-agent` runs. If Zeek and Suricata run on `192.168.80.11` but the agent runs on `100.64.0.3`, mount the sensor logs onto the agent VM over NFS, SSHF
+
+# On Zeek/Suricata VM (NFS Server):
+sudo apt install nfs-kernel-server -y
+
+# Create export directory
+sudo mkdir -p /opt/zeek/logs
+sudo mkdir -p /var/log/suricata
+
+# Edit exports file
+sudo nano /etc/exports
+
+# Add these lines:
+/opt/zeek/logs  192.168.80.0/24(ro,sync,no_subtree_check,no_root_squash)
+/var/log/suricata  192.168.80.0/24(ro,sync,no_subtree_check,no_root_squash)
+
+# Apply exports
+sudo exportfs -a
+sudo systemctl restart nfs-kernel-server
+
+# Open firewall (if UFW is active)
+sudo ufw allow from 192.168.80.0/24 to any port nfs
+sudo ufw allow from 192.168.80.0/24 to any port 2049
+
+# On n8n/Agent VM (NFS Client):
+sudo apt install nfs-common -y
+
+# Create mount points
+sudo mkdir -p /mnt/zeek-logs
+sudo mkdir -p /mnt/suricata-logs
+
+# Add to fstab for persistence
+echo '192.168.80.11:/opt/zeek/logs /mnt/zeek-logs nfs defaults 0 0' | sudo tee -a /etc/fstab
+echo '192.168.80.11:/var/log/suricata /mnt/suricata-logs nfs defaults 0 0' | sudo tee -a /etc/fstab
+
+# Mount all
+sudo mount -a
+
+# Verify
+ls -la /mnt/zeek-logs/current/
+ls -la /mnt/suricata-logs/
+
+# If permission denied, check NFS server exports and try:
+sudo mount -v -t nfs 192.168.80.11:/opt/zeek/logs /mnt/zeek-logsS, or another read-only sync mechanism and point `ZEEK_LOG_DIR` / `SURICATA_EVE_LOG` to those mounted paths.
 
 Example NFS mount:
 
@@ -1081,7 +1176,7 @@ Current decision policy:
 - Always map suspected behavior to MITRE ATT&CK
 - Query Zeek and Suricata only when Wazuh/MITRE evidence is inconclusive
 - `confidence >= 80` means `auto-block`
-- `confidence 40-79` means `analyst-review`
+- `40-79` confidence means `analyst-review`
 - `confidence < 40` means `monitor`
 - The agent only recommends action; n8n performs pfSense/Telegram/Wazuh response
 
@@ -1281,10 +1376,9 @@ Environment=N8N_PORT=5678
 Environment=N8N_HOST=0.0.0.0
 Environment=N8N_PROTOCOL=http
 Environment=WEBHOOK_URL=http://100.64.0.3:5678
-Environment=N8N_BASIC_AUTH_ACTIVE=true
-Environment=N8N_BASIC_AUTH_USER=admin
-Environment=N8N_BASIC_AUTH_PASSWORD=YOUR_SECURE_PASSWORD
-ExecStart=/usr/bin/n8n start
+# n8n v1.0+ uses built-in user management, not basic auth
+# On first launch, go to http://100.64.0.3:5678 and create owner account
+ExecStart=/usr/bin/env n8n start
 Restart=always
 RestartSec=10
 
@@ -1421,18 +1515,36 @@ Mode: Combine
 
 **Node 8a — pfSense Block** (from Switch output 0 — auto-block only)
 ```
-Type: HTTP Request
-Method: POST
-URL: https://192.168.80.10/api/v1/firewall/alias/entry
-Authentication: Generic Credential Type
-  Header Auth: Authorization = Bearer YOUR_PFSENSE_TOKEN
-SSL: Ignore SSL errors (self-signed cert)
+# First, check your pfSense API version:
+curl -k -H "Authorization: Bearer YOUR_TOKEN" https://192.168.80.10/api/v2/firewall/alias
+
+# For pfSense-pkg-API v2 (recommended):
+POST https://192.168.80.10/api/v2/firewall/alias
 Body:
 {
   "name": "ai_soc_blocklist",
-  "address": "{{ $('Parse Agent Decision').item.json.src_ip }}",
-  "detail": "AI SOC Agent block - {{ $('Parse Agent Decision').item.json.mitre }} - {{ $now }}"
+  "type": "host",
+  "address": [
+    { "value": "{{ $('Parse Agent Decision').item.json.src_ip }}" }
+  ],
+  "detail": [
+    { "value": "AI SOC Agent block - {{ $now }}" }
+  ]
 }
+
+# For pfSense-pkg-API v1 (legacy):
+PUT https://192.168.80.10/api/v1/firewall/alias/entry
+Body:
+{
+  "name": "ai_soc_blocklist",
+  "address": "{{ $('Parse Agent Decision').item.json.src_ip }}"
+}
+
+# Note: You must first create the alias in pfSense:
+# Firewall → Aliases → IP → Add
+# Name: ai_soc_blocklist
+# Type: Host(s)
+# Then apply the alias to a block rule
 ```
 
 **Node 8b — Apply pfSense Rules** (after adding to alias)
@@ -1451,11 +1563,11 @@ Credential: Your Bot Token
 Operation: Send Message
 Chat ID: YOUR_CHAT_ID
 Text:
-🚨 SECURITY ALERT — {{ $('Parse Agent Decision').item.json.threat_type | upper }}
+🚨 SECURITY ALERT — {{ $('Parse Agent Decision').item.json.threat_type.toUpperCase() }}
 
 📍 Source IP:  {{ $('Parse Agent Decision').item.json.src_ip }}
 🎯 Confidence: {{ $('Parse Agent Decision').item.json.confidence }}%
-⚡ Action:     {{ $('Parse Agent Decision').item.json.action | upper }}
+⚡ Action:     {{ $('Parse Agent Decision').item.json.action.toUpperCase() }}
 🗺️ MITRE:      {{ $('Parse Agent Decision').item.json.mitre }}
 ⏱ Duration:   {{ $('Parse Agent Decision').item.json.duration_ms }}ms
 
@@ -1484,11 +1596,12 @@ After receiving message:
 
 **Node 11 — Log to Wazuh** (final node — all paths)
 ```
-Type: HTTP Request
-Method: POST
-URL: https://100.64.0.2:55000/events
-Authentication: Bearer YOUR_WAZUH_TOKEN
-SSL: Ignore SSL errors
+# Wazuh API does NOT have /events endpoint. Use the Indexer API (Elasticsearch-compatible)
+# or the Wazuh analysis engine via a local log file.
+
+# Method A: Indexer API (Direct to storage)
+POST https://100.64.0.2:9200/ai-soc-decisions/_doc
+Authentication: Basic Auth (admin / YOUR_INDEXER_PASSWORD)
 Body:
 {
   "event": "AI_SOC_AGENT_DECISION",
@@ -1501,6 +1614,10 @@ Body:
   "incident_report": "{{ $('Parse Agent Decision').item.json.report }}",
   "timestamp": "{{ $now }}"
 }
+
+# Method B: Custom Log File (Monitored by Wazuh Agent)
+# 1. On n8n VM, append to /var/log/ai_agent_decisions.log
+# 2. Add <localfile> to ossec.conf to monitor this file
 ```
 
 ---
@@ -1631,32 +1748,48 @@ timeout 30 sudo hping3 -S --flood -V -p 80 192.168.80.13
 
 **Attack 4 — C2 Beaconing Simulation**
 ```bash
-echo "Attack 4 started: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+# C2 DNS Beaconing Simulation
+# This matches Suricata rule 9000004 (long DNS queries)
 
-# Create a simple beaconing script
-cat > ~/c2_beacon.py << 'PYEOF'
-import requests
-import time
-import random
+# Install dnsutils
+sudo apt install -y dnsutils
 
-TARGET = "http://192.168.80.13"
-INTERVAL = 30  # seconds between beacons
+# Create DNS beaconing test script
+cat > ~/c2_dns_beacon.sh << 'EOF'
+#!/bin/bash
+# C2 DNS Beaconing Simulation
+# Sends encoded data in DNS queries to trigger Suricata SID 9000004
 
-print(f"C2 beacon started — interval: {INTERVAL}s")
-for i in range(10):
-    try:
-        # Beacon with encoded data in URI (simulates C2 check-in)
-        jitter = random.randint(-3, 3)
-        requests.get(f"{TARGET}/?beacon={i}&data={'A'*50}", timeout=5)
-        print(f"Beacon {i+1}/10 sent")
-    except:
-        pass
-    time.sleep(INTERVAL + jitter)
-PYEOF
+TARGET_DOMAIN="beacon.test"
+VICTIM_IP="192.168.80.13"
 
-python3 ~/c2_beacon.py
+echo "Starting C2 DNS beaconing simulation..."
+echo "Target: $VICTIM_IP"
+echo "Domain: $TARGET_DOMAIN"
+echo ""
 
-# Expected: zeek_detect_beaconing fires → Wazuh → Agent deep-path
+for i in {1..10}; do
+  # Generate long subdomain (30+ chars) to trigger the rule
+  SUBDOMAIN=$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 35)
+
+  echo "Beacon $i/10: ${SUBDOMAIN}.${TARGET_DOMAIN}"
+  dig +short ${SUBDOMAIN}.${TARGET_DOMAIN} @192.168.80.10
+
+  # Random interval 25-35 seconds to simulate beaconing
+  SLEEP_TIME=$((25 + RANDOM % 10))
+  echo "Sleeping ${SLEEP_TIME}s..."
+  sleep $SLEEP_TIME
+done
+
+echo "C2 beaconing simulation complete."
+EOF
+
+chmod +x ~/c2_dns_beacon.sh
+
+# Run the test
+./c2_dns_beacon.sh
+
+# Expected: Suricata SID 9000004 → Wazuh → Agent deep-path
 # MITRE: T1071.004
 ```
 
