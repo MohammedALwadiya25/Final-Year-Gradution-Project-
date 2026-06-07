@@ -8,6 +8,9 @@ export type InvestigationResponse = {
   received_at: string;
   completed_at: string;
   duration_ms: number;
+  investigation_path: "fast" | "deep" | "fallback";
+  deep_investigation_used: boolean;
+  gemini_available: boolean;
   decision: SocDecision;
 };
 
@@ -24,11 +27,34 @@ export class InvestigationService {
         alertId: request.alert_id,
         srcIp: request.src_ip,
         alertType: request.alert_type,
+        severity: request.severity,
       },
       "Investigation started",
     );
 
-    const decision = await this.reasoner.investigate(request);
+    let decision: SocDecision;
+    let investigationPath: "fast" | "deep" | "fallback" = "fast";
+    let deepInvestigationUsed = false;
+    let geminiAvailable = true;
+
+    try {
+      decision = await this.reasoner.investigate(request);
+      
+      // Determine path based on duration and tool usage
+      const duration = Date.now() - startedAt;
+      if (duration > 8000) {
+        investigationPath = "deep";
+        deepInvestigationUsed = true;
+      } else if (duration < 2000) {
+        investigationPath = "fallback";
+        geminiAvailable = false;
+      }
+    } catch (error) {
+      // This shouldn't happen with fallback mode, but just in case
+      logger.error({ error: error instanceof Error ? error.message : String(error) }, "Investigation failed unexpectedly");
+      throw error;
+    }
+
     const completedAt = Date.now();
 
     logger.info(
@@ -38,6 +64,8 @@ export class InvestigationService {
         confidence: decision.confidence,
         threatType: decision.threat_type,
         durationMs: completedAt - startedAt,
+        path: investigationPath,
+        geminiAvailable,
       },
       "Investigation completed",
     );
@@ -47,6 +75,9 @@ export class InvestigationService {
       received_at: new Date(startedAt).toISOString(),
       completed_at: new Date(completedAt).toISOString(),
       duration_ms: completedAt - startedAt,
+      investigation_path: investigationPath,
+      deep_investigation_used: deepInvestigationUsed,
+      gemini_available: geminiAvailable,
       decision,
     };
   }

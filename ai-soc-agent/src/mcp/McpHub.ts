@@ -21,10 +21,20 @@ type ConnectedServer = {
 export class McpHub {
   private readonly servers = new Map<string, ConnectedServer>();
   private readonly tools = new Map<string, McpToolDefinition>();
+  private readonly failedServers: string[] = [];
 
   async connect(): Promise<void> {
     for (const serverConfig of config.mcp.servers) {
-      await this.connectOne(serverConfig);
+      try {
+        await this.connectOne(serverConfig);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.warn(
+          { server: serverConfig.id, error: message },
+          "MCP server failed to connect, skipping"
+        );
+        this.failedServers.push(serverConfig.id);
+      }
     }
 
     if (this.tools.size === 0) {
@@ -32,10 +42,21 @@ export class McpHub {
         "No MCP tools were discovered. Build the MCP repos and check .env paths.",
       );
     }
+
+    if (this.failedServers.length > 0) {
+      logger.warn(
+        { failedServers: this.failedServers, availableServers: Array.from(this.servers.keys()) },
+        "Some MCP servers failed to connect. Agent will operate with reduced capabilities."
+      );
+    }
   }
 
   listTools(): McpToolDefinition[] {
     return [...this.tools.values()];
+  }
+
+  getFailedServers(): string[] {
+    return [...this.failedServers];
   }
 
   async callTool(
