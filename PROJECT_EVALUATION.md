@@ -100,7 +100,7 @@ The offline-first STIX bundle caching is the right design for a lab environment 
 
 **Issue:** The SOC integrations (TheHive, Cortex, MISP) are defined but are optional and may not be reachable in the lab. The MCP server should start successfully and return helpful "not configured" messages when these are absent, rather than failing silently. Verify this behavior.
 
-**Issue:** The mitre-mcp README still refers to "OpenClaw" and "Hermes Agent" as integration targets — these are placeholder sections that should either be filled in properly or removed before submitting.
+**Fixed:** The OpenClaw, Hermes Agent, and Codex CLI sections have been removed from `mitre-mcp/README.md` and `wazuh-mcp/README.md`. These were upstream boilerplate sections irrelevant to this project.
 
 ---
 
@@ -109,11 +109,11 @@ The offline-first STIX bundle caching is the right design for a lab environment 
 ### 3.1 Credential Management ✅ Good
 
 - `.env` is in `.gitignore` at root and per-package level
-- `.env.example` files exist with placeholder values
-- No hardcoded secrets found in the codebase
+- `.env.example` files exist with placeholder values — `wazuh-mcp/.env.example` updated to use `YOUR_WAZUH_PASSWORD_HERE` instead of an actual default value
+- `ai-soc-agent/.gitignore` added (was missing)
+- No hardcoded secrets in codebase
 
-**Issue:** `wazuh-mcp` and `zeek-mcp` have separate `.gitignore` files but `ai-soc-agent` was missing one (now fixed). Verify no `.env` files have been committed in the git history:
-
+**Verify** no `.env` files were committed in git history:
 ```bash
 git log --all --full-history -- "**/.env"
 git log --all --full-history -- ".env"
@@ -197,7 +197,7 @@ These don't require a live Gemini API — mock the `generate()` method.
 - [ ] **Add `express-rate-limit`** to the `/investigate` endpoint
 - [ ] **Replace raw `https.request`** in `GeminiSocReasoner` with `undici` or `node-fetch`
 - [ ] **Document production deployment changes** (SSL verify, authentication, dedicated subnet router)
-- [ ] **Clean up placeholder references** to "OpenClaw" in `mitre-mcp/README.md`
+- [x] ~~**Clean up placeholder references** to "OpenClaw" in `mitre-mcp/README.md`~~ — Fixed (also removed from `wazuh-mcp/README.md`)
 
 ### Priority 3 — Nice to Have
 

@@ -820,7 +820,7 @@ sudo systemctl restart wazuh-manager
 ### 5.1 Fork Repos — Do This First
 
 ```
-1. Go to https://github.com/solomonneas
+1. Go to https://github.com/MohammedALwadiya25
 2. Fork these 4 repos to your account:
    → zeek-mcp
    → suricata-mcp
@@ -858,7 +858,7 @@ mkdir -p ~/mcp-servers && cd ~/mcp-servers
 
 ```bash
 cd ~/mcp-servers
-git clone https://github.com/YOUR_GITHUB/zeek-mcp
+git clone https://github.com/MohammedALwadiya25/Final-Year-Gradution-Project-
 cd zeek-mcp
 npm install
 ```
@@ -906,7 +906,7 @@ Ctrl+C
 
 ```bash
 cd ~/mcp-servers
-git clone https://github.com/YOUR_GITHUB/suricata-mcp
+git clone https://github.com/MohammedALwadiya25/Final-Year-Gradution-Project-
 cd suricata-mcp
 npm install
 ```
@@ -934,7 +934,7 @@ Ctrl+C
 
 ```bash
 cd ~/mcp-servers
-git clone https://github.com/YOUR_GITHUB/wazuh-mcp
+git clone https://github.com/MohammedALwadiya25/Final-Year-Gradution-Project-
 cd wazuh-mcp
 npm install
 ```
@@ -966,7 +966,7 @@ Ctrl+C
 
 ```bash
 cd ~/mcp-servers
-git clone https://github.com/YOUR_GITHUB/mitre-mcp
+git clone https://github.com/MohammedALwadiya25/Final-Year-Gradution-Project-
 cd mitre-mcp
 npm install
 ```

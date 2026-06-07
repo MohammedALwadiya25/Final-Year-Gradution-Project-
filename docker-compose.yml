@@ -3,80 +3,28 @@ version: "3.9"
 # ─────────────────────────────────────────────────────────────────────────────
 # AI SOC Agent NIDS — Docker Compose (Demo / Development mode)
 #
-# This compose file runs the AI agent with all 4 MCP servers in a single
-# network. It uses sample/test data from each MCP package.
-# For the full lab environment (pfSense, Zeek, Suricata, Wazuh), see
-# NIDS_Full_Milestone_Guide.md.
+# The AI agent image bundles all 4 MCP servers (spawned via stdio internally).
+# This compose file wires up volumes for live Zeek/Suricata logs and the
+# persistent MITRE ATT&CK cache.
+#
+# Prerequisite: Build the image from the repo root:
+#   docker compose build
 #
 # Usage:
-#   docker compose up --build
+#   cp ai-soc-agent/.env.example .env   # fill in GEMINI_API_KEY + Wazuh creds
+#   docker compose up
 #   docker compose down
+#
+# For the full lab environment (pfSense, Zeek, Suricata, Wazuh) see:
+#   NIDS_Full_Milestone_Guide.md
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
-
-  # ── Zeek MCP ─────────────────────────────────────────────────────────────
-  zeek-mcp:
-    build:
-      context: ./zeek-mcp
-      dockerfile: Dockerfile
-    environment:
-      ZEEK_LOG_DIR: /data/zeek
-      ZEEK_LOG_FORMAT: json
-      ZEEK_MAX_RESULTS: "1000"
-    volumes:
-      - zeek-logs:/data/zeek:ro
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "node", "-e", "process.exit(0)"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-
-  # ── Suricata MCP ──────────────────────────────────────────────────────────
-  suricata-mcp:
-    build:
-      context: ./suricata-mcp
-      dockerfile: Dockerfile
-    environment:
-      SURICATA_EVE_LOG: /data/suricata/eve.json
-      SURICATA_MAX_RESULTS: "1000"
-    volumes:
-      - suricata-logs:/data/suricata:ro
-    restart: unless-stopped
-
-  # ── Wazuh MCP ─────────────────────────────────────────────────────────────
-  wazuh-mcp:
-    build:
-      context: ./wazuh-mcp
-      dockerfile: Dockerfile
-    environment:
-      WAZUH_URL: ${WAZUH_URL:-https://wazuh-manager:55000}
-      WAZUH_USERNAME: ${WAZUH_USERNAME:-wazuh-wui}
-      WAZUH_PASSWORD: ${WAZUH_PASSWORD:?Set WAZUH_PASSWORD in .env}
-      WAZUH_VERIFY_SSL: ${WAZUH_VERIFY_SSL:-false}
-      WAZUH_INDEXER_URL: ${WAZUH_INDEXER_URL:-https://wazuh-indexer:9200}
-      WAZUH_INDEXER_USERNAME: ${WAZUH_INDEXER_USERNAME:-admin}
-      WAZUH_INDEXER_PASSWORD: ${WAZUH_INDEXER_PASSWORD:-}
-    restart: unless-stopped
-
-  # ── MITRE MCP ─────────────────────────────────────────────────────────────
-  mitre-mcp:
-    build:
-      context: ./mitre-mcp
-      dockerfile: Dockerfile
-    environment:
-      MITRE_MATRICES: enterprise
-      MITRE_DATA_DIR: /data/mitre
-    volumes:
-      - mitre-cache:/data/mitre
-    restart: unless-stopped
-
-  # ── AI SOC Agent ──────────────────────────────────────────────────────────
   ai-soc-agent:
     build:
-      context: ./ai-soc-agent
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ai-soc-agent/Dockerfile
+    image: ai-soc-agent:latest
     ports:
       - "3000:3000"
     environment:
@@ -87,45 +35,48 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY:?Set GEMINI_API_KEY in .env}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
       MCP_READONLY: "true"
-      # Agent discovers MCP servers via stdio — paths inside the container
-      ZEEK_MCP_COMMAND: node
-      ZEEK_MCP_ARGS: /app/zeek-mcp/dist/index.js
-      SURICATA_MCP_COMMAND: node
-      SURICATA_MCP_ARGS: /app/suricata-mcp/dist/index.js
-      WAZUH_MCP_COMMAND: node
-      WAZUH_MCP_ARGS: /app/wazuh-mcp/dist/index.js
-      MITRE_MCP_COMMAND: node
-      MITRE_MCP_ARGS: /app/mitre-mcp/dist/index.js
-      # Sensor paths (same volumes as MCP servers)
+      # Sensor paths (mount host dirs below as volumes)
       ZEEK_LOG_DIR: /data/zeek
-      ZEEK_LOG_FORMAT: json
+      ZEEK_LOG_FORMAT: ${ZEEK_LOG_FORMAT:-json}
       SURICATA_EVE_LOG: /data/suricata/eve.json
-      WAZUH_URL: ${WAZUH_URL:-https://wazuh-manager:55000}
+      ZEEK_LOGS_DIR: /data/zeek
+      # Wazuh API
+      WAZUH_URL: ${WAZUH_URL:-https://100.64.0.2:55000}
       WAZUH_USERNAME: ${WAZUH_USERNAME:-wazuh-wui}
       WAZUH_PASSWORD: ${WAZUH_PASSWORD:-}
-      WAZUH_VERIFY_SSL: "false"
+      WAZUH_VERIFY_SSL: ${WAZUH_VERIFY_SSL:-false}
       WAZUH_INDEXER_URL: ${WAZUH_INDEXER_URL:-}
       WAZUH_INDEXER_USERNAME: ${WAZUH_INDEXER_USERNAME:-admin}
       WAZUH_INDEXER_PASSWORD: ${WAZUH_INDEXER_PASSWORD:-}
+      WAZUH_INDEXER_VERIFY_SSL: ${WAZUH_INDEXER_VERIFY_SSL:-false}
+      # MITRE ATT&CK
       MITRE_MATRICES: enterprise
       MITRE_DATA_DIR: /data/mitre
     volumes:
+      # Point these at your actual Zeek / Suricata log directories, or leave
+      # as named volumes for demo mode (empty — MCP servers handle gracefully).
       - zeek-logs:/data/zeek:ro
       - suricata-logs:/data/suricata:ro
       - mitre-cache:/data/mitre
-    depends_on:
-      - zeek-mcp
-      - suricata-mcp
-      - wazuh-mcp
-      - mitre-mcp
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-fs", "http://localhost:3000/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
       interval: 15s
       timeout: 5s
       retries: 3
+      start_period: 20s
 
 volumes:
   zeek-logs:
+    driver: local
+    driver_opts:
+      type: none
+      device: ${ZEEK_HOST_LOG_DIR:-/tmp/zeek-demo-logs}
+      o: bind
   suricata-logs:
+    driver: local
+    driver_opts:
+      type: none
+      device: ${SURICATA_HOST_LOG_DIR:-/tmp/suricata-demo-logs}
+      o: bind
   mitre-cache:
