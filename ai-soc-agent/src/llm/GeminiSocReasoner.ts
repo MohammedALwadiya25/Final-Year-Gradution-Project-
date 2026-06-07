@@ -190,7 +190,7 @@ export class GeminiSocReasoner {
       if (corrected.recommended_block_duration === "none") {
         corrected.recommended_block_duration = "1h";
       }
-    } else if (corrected.confidence >= 50) {
+    } else if (corrected.confidence >= 40) {
       corrected.action = "analyst-review";
       if (corrected.recommended_block_duration === "permanent") {
         corrected.recommended_block_duration = "24h";
