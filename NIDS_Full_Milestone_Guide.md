@@ -1,7 +1,7 @@
 # 🛡️ AI-Powered SOC Agent NIDS — Full Milestone & Configuration Guide
 
 > **Project:** Design and Implementation of an AI-Powered SOC Agent Using MCP Servers for Intelligent Intrusion Detection and Automated Response in E-Commerce Environments  
-> **Stack:** pfSense · Zeek · Suricata · Wazuh · n8n · Claude API · MCP Servers  
+> **Stack:** pfSense · Zeek · Suricata · Wazuh · n8n · Google Gemini · MCP Servers  
 > **Network:** VMware Workstation (Laptop) + Azure (Tailscale mesh)  
 > **Duration:** 12 Weeks · 6 Phases  
 > **Architecture:** Wazuh-Primary Hybrid AI Agent  
@@ -78,12 +78,20 @@ pfSense  Telegram  Wazuh
 
 ### MCP Server Roles
 
-| MCP Server | Port | Called When | Key Tools |
+The current code does not expose the MCP servers as HTTP services on ports 3001-3004. The AI agent starts each MCP server as a local stdio child process through `McpHub`.
+
+| MCP Server | Transport | Called When | Key Tools |
 |---|---|---|---|
-| `wazuh-mcp` | 3003 | Every alert | `get_alerts`, `search_alerts`, `get_fim_files` |
-| `mitre-mcp` | 3004 | Every alert | `map_technique`, `threat_group_profiling` |
-| `zeek-mcp` | 3001 | Confidence 40–79% only | `zeek_ssh_bruteforce`, `zeek_detect_beaconing`, `zeek_suspicious_http`, `zeek_detect_anomalies` |
-| `suricata-mcp` | 3002 | Confidence 40–79% only | `suricata_query_alerts`, `suricata_beaconing_detection`, `suricata_lateral_movement_detection` |
+| `wazuh-mcp` | stdio child process | Every alert | `wazuh__get_alerts`, `wazuh__search_alerts`, rules/syscheck/diagnostics tools |
+| `mitre-mcp` | stdio child process | Every alert | `mitre__mitre_map_alert_to_technique`, ATT&CK technique/tactic tools |
+| `zeek-mcp` | stdio child process | Confidence 40-79% only | `zeek__zeek_ssh_bruteforce`, `zeek__zeek_detect_beaconing`, `zeek__zeek_suspicious_http`, `zeek__zeek_detect_anomalies` |
+| `suricata-mcp` | stdio child process | Confidence 40-79% only | `suricata__suricata_query_alerts`, `suricata__suricata_beaconing_detection`, `suricata__suricata_lateral_movement_detection` |
+
+The only HTTP service exposed by the current project is the AI agent:
+
+- `GET /health`
+- `GET /tools`
+- `POST /investigate`
 
 ---
 
@@ -95,7 +103,7 @@ pfSense  Telegram  Wazuh
 |---|---|---|---|---|---|---|---|
 | pfSense | VMware Local | pfSense 2.7 | 2 | 2 GB | 20 GB | `192.168.80.10` | Firewall + Gateway + VLAN + SPAN |
 | Zeek + Suricata | VMware Local | Ubuntu 22.04 | 4 | 4 GB | 50 GB | `192.168.80.11` | Detection Engine |
-| MCP Servers | VMware Local | Ubuntu 22.04 | 2 | 4 GB | 30 GB | `192.168.80.12` | All 4 MCP servers |
+| Agent/MCP Runtime | Azure or VMware | Ubuntu 22.04 | 2 | 4 GB | 30 GB | Prefer `100.64.0.3` with the AI Agent | Repo checkout; AI agent spawns all 4 MCP servers over stdio |
 | DVWA Web Server | VMware Local | Ubuntu 22.04 | 2 | 2 GB | 20 GB | `192.168.80.13` | Attack Target (DMZ) |
 | Windows Client | VMware Local | Windows 10 | 2 | 4 GB | 60 GB | `192.168.80.14` | Insider Threat Sim |
 | Wazuh Server | Azure | Ubuntu 22.04 | 4 | 8 GB | 100 GB | `100.64.0.2` (Tailscale) | SIEM |
@@ -109,7 +117,7 @@ pfSense VLANs:
   DMZ  VLAN10  →  192.168.80.13  (DVWA Web Server)
   LAN  VLAN20  →  192.168.80.14  (Windows Client)
   MGMT VLAN30  →  192.168.80.11  (Zeek+Suricata)
-                  192.168.80.12  (MCP Servers)
+                  192.168.80.12  (optional repo/runtime VM; no HTTP MCP ports)
 
 Tailscale Overlay (WireGuard encrypted):
   Laptop (Subnet Router)  →  100.64.0.1
@@ -124,11 +132,9 @@ Azure VMs reach all local VMs using 192.168.80.x directly.
 ### Port Reference
 
 ```
-MCP Servers (on 192.168.80.12):
-  zeek-mcp      → :3001
-  suricata-mcp  → :3002
-  wazuh-mcp     → :3003
-  mitre-mcp     → :3004
+MCP runtime:
+  Current code uses stdio MCP child processes spawned by ai-soc-agent.
+  No MCP HTTP ports 3001-3004 are exposed.
 
 Azure Services (on 100.64.0.2 / 100.64.0.3):
   Wazuh API     → :55000
@@ -425,15 +431,15 @@ tailscale ip -4
 # From Wazuh Azure VM — ping a local VMware VM
 ping 192.168.80.11    # Should respond if Tailscale routing works
 
-# From MCP VM — reach Wazuh API
+# From Agent runtime VM — reach Wazuh API
 curl http://100.64.0.2:55000
 # Should return Wazuh JSON response
 
-# From n8n VM — reach MCP servers
-curl http://192.168.80.12:3001/health
+# From n8n VM — reach AI agent
+curl http://100.64.0.3:3000/health
 ```
 
-> ✅ **Tip:** If pings work but curl times out — check Azure NSG (Network Security Group). Allow inbound TCP from `100.64.0.0/10` on ports `55000, 9200, 5678, 3000, 3001-3004`.
+> ✅ **Tip:** If pings work but curl times out — check Azure NSG (Network Security Group). Allow inbound TCP from `100.64.0.0/10` on ports `55000, 9200, 5678, 3000`. The MCP servers do not need inbound ports in the current stdio architecture.
 
 > ⚠️ **Risk:** Your laptop must be powered on for Azure to reach VMware VMs. Document this as a "lab constraint" in your thesis. In production, a dedicated server (Proxmox/ESXi) would eliminate this.
 
@@ -807,700 +813,347 @@ sudo systemctl restart wazuh-manager
 
 ---
 
-## 5. Phase 3 — MCP Server Setup (Weeks 5–6)
+## 5. Phase 3 — MCP Runtime Setup (Weeks 5-6)
 
 ### Objectives
-- Fork all 4 MCP repos to your GitHub on Day 1
-- Clone, build, and configure each MCP server in order
-- Test each server independently before integration
-- Run all 4 servers with PM2
+- Clone the current monorepo and build all five workspaces
+- Configure the AI agent so it can spawn all four MCP servers over stdio
+- Give the stdio MCP child processes access to Zeek, Suricata, Wazuh, and MITRE data
+- Verify tool discovery through the agent `/health`, `/tools`, and smoke test
 
 ---
 
-### 5.1 Fork Repos — Do This First
+### 5.1 Use the Current Monorepo
+
+The current project is a single npm workspace repository. Do not fork and deploy four separate HTTP MCP services for this codebase.
+
+```bash
+git clone https://github.com/MohammedALwadiya25/Final-Year-Gradution-Project-.git
+cd Final-Year-Gradution-Project-
+```
+
+The repo contains:
 
 ```
-1. Go to https://github.com/MohammedALwadiya25
-2. Fork these 4 repos to your account:
-   → zeek-mcp
-   → suricata-mcp
-   → wazuh-mcp
-   → mitre-mcp
-
-Work from YOUR fork, not the original.
-This protects you if the original repo changes.
+zeek-mcp/          # stdio MCP server for Zeek logs
+suricata-mcp/      # stdio MCP server for Suricata EVE logs
+wazuh-mcp/         # stdio MCP server for Wazuh API / Indexer
+mitre-mcp/         # stdio MCP server for MITRE ATT&CK
+ai-soc-agent/      # Express API; spawns all MCP servers via stdio
 ```
 
 ---
 
-### 5.2 MCP VM Preparation (192.168.80.12)
+### 5.2 Runtime VM Preparation
+
+Run the current code where the AI agent will live. In the planned lab this is the n8n + AI Agent VM, `100.64.0.3`.
 
 ```bash
 # Install Node.js 20
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs git
 node --version   # must be v20.x.x
+npm --version    # must be v10.x.x or newer
 
-# Install PM2
+# Optional process manager for the AI agent only
 sudo npm install -g pm2
-
-# Create workspace
-mkdir -p ~/mcp-servers && cd ~/mcp-servers
 ```
 
 ---
 
-### 5.3 MCP Server Installation Order
-
-**Install in this exact order. Test each before moving to the next.**
-
-#### Step 1 — zeek-mcp (install first — no external dependencies)
+### 5.3 Build All Workspaces
 
 ```bash
-cd ~/mcp-servers
-git clone https://github.com/MohammedALwadiya25/Final-Year-Gradution-Project-
-cd zeek-mcp
+cd Final-Year-Gradution-Project-
 npm install
+npm run build
 ```
 
+Expected build outputs:
+
+```
+zeek-mcp/dist/index.js
+suricata-mcp/dist/index.js
+wazuh-mcp/dist/index.js
+mitre-mcp/dist/index.js
+ai-soc-agent/dist/server.js
+```
+
+---
+
+### 5.4 Configure the Agent and MCP Child Processes
+
+Create the agent environment file from the repo template:
+
 ```bash
-# Create .env file
-cat > .env << 'ENVEOF'
+cp ai-soc-agent/.env.example ai-soc-agent/.env
+nano ai-soc-agent/.env
+```
+
+Required values:
+
+```env
+# Gemini AI
+AI_PROVIDER=gemini
+GEMINI_API_KEY=YOUR_GEMINI_API_KEY_HERE
+GEMINI_MODEL=gemini-2.5-flash
+AI_MAX_TOKENS=1600
+AGENT_MAX_TOOL_ROUNDS=8
+
+# Agent HTTP API
+NODE_ENV=production
+PORT=3000
+LOG_LEVEL=info
+MCP_READONLY=true
+
+# Local stdio MCP commands
+ZEEK_MCP_COMMAND=node
+ZEEK_MCP_ARGS=../zeek-mcp/dist/index.js
+SURICATA_MCP_COMMAND=node
+SURICATA_MCP_ARGS=../suricata-mcp/dist/index.js
+WAZUH_MCP_COMMAND=node
+WAZUH_MCP_ARGS=../wazuh-mcp/dist/index.js
+MITRE_MCP_COMMAND=node
+MITRE_MCP_ARGS=../mitre-mcp/dist/index.js
+
+# Sensor logs
+ZEEK_LOG_DIR=/opt/zeek/logs/current
 ZEEK_LOG_PATH=/opt/zeek/logs/current
-ZEEK_MCP_PORT=3001
-ZEEK_MCP_HOST=0.0.0.0
-ENVEOF
-```
-
-> ⚠️ **Important:** The zeek-mcp server needs to read Zeek logs. But Zeek runs on `192.168.80.11` and MCP servers run on `192.168.80.12`. You have two options:
->
-> **Option A (Recommended — simpler):** Run zeek-mcp on the Zeek VM itself (`192.168.80.11`) on port 3001. Adjust all IP references accordingly.
->
-> **Option B:** Mount Zeek logs via NFS from `.11` to `.12`:
-> ```bash
-> # On 192.168.80.11 (Zeek VM) — share logs
-> sudo apt install nfs-kernel-server
-> echo "/opt/zeek/logs 192.168.80.12(ro,sync,no_subtree_check)" | sudo tee -a /etc/exports
-> sudo exportfs -ra
->
-> # On 192.168.80.12 (MCP VM) — mount logs
-> sudo apt install nfs-common
-> sudo mkdir -p /mnt/zeek-logs
-> sudo mount 192.168.80.11:/opt/zeek/logs /mnt/zeek-logs
-> # Then set: ZEEK_LOG_PATH=/mnt/zeek-logs/current
-> ```
-
-```bash
-npm run build
-npm start &   # Test in foreground first
-
-# Test zeek-mcp
-curl http://localhost:3001/health
-# Expected: {"status":"ok"} or tool list JSON
-
-# Stop and move to next
-Ctrl+C
-```
-
-#### Step 2 — suricata-mcp
-
-```bash
-cd ~/mcp-servers
-git clone https://github.com/MohammedALwadiya25/Final-Year-Gradution-Project-
-cd suricata-mcp
-npm install
-```
-
-```bash
-cat > .env << 'ENVEOF'
+ZEEK_LOG_FORMAT=tsv
+SURICATA_EVE_LOG=/var/log/suricata/eve.json
 EVE_JSON_PATH=/var/log/suricata/eve.json
-SURICATA_RULES_PATH=/etc/suricata/rules
-SURICATA_MCP_PORT=3002
-SURICATA_MCP_HOST=0.0.0.0
-ENVEOF
-```
+ZEEK_LOGS_DIR=/opt/zeek/logs/current
 
-> ⚠️ **Same issue as zeek-mcp:** Suricata runs on `192.168.80.11`. Either run suricata-mcp on `.11` as well, or NFS-mount the eve.json directory to `.12`.
-
-```bash
-npm run build
-npm start &
-
-curl http://localhost:3002/health
-Ctrl+C
-```
-
-#### Step 3 — wazuh-mcp
-
-```bash
-cd ~/mcp-servers
-git clone https://github.com/MohammedALwadiya25/Final-Year-Gradution-Project-
-cd wazuh-mcp
-npm install
-```
-
-```bash
-cat > .env << 'ENVEOF'
+# Wazuh
 WAZUH_URL=https://100.64.0.2:55000
-WAZUH_USER=wazuh-admin
-WAZUH_PASS=YOUR_WAZUH_ADMIN_PASSWORD
+WAZUH_USERNAME=wazuh-admin
+WAZUH_PASSWORD=YOUR_WAZUH_ADMIN_PASSWORD
 WAZUH_VERIFY_SSL=false
-WAZUH_MCP_PORT=3003
-WAZUH_MCP_HOST=0.0.0.0
-ENVEOF
+WAZUH_INDEXER_URL=https://100.64.0.2:9200
+WAZUH_INDEXER_USERNAME=admin
+WAZUH_INDEXER_PASSWORD=YOUR_WAZUH_INDEXER_PASSWORD
+WAZUH_INDEXER_VERIFY_SSL=false
+
+# MITRE ATT&CK cache
+MITRE_MATRICES=enterprise
 ```
 
-```bash
-npm run build
-npm start &
+Important: because the MCP servers are stdio children, they read local paths from the machine where `ai-soc-agent` runs. If Zeek and Suricata run on `192.168.80.11` but the agent runs on `100.64.0.3`, mount the sensor logs onto the agent VM over NFS, SSHFS, or another read-only sync mechanism and point `ZEEK_LOG_DIR` / `SURICATA_EVE_LOG` to those mounted paths.
 
-curl http://localhost:3003/health
-# Test actual Wazuh connection:
-curl -X POST http://localhost:3003/call \
-  -H "Content-Type: application/json" \
-  -d '{"tool":"get_alerts","params":{"limit":5}}'
-Ctrl+C
+Example NFS mount:
+
+```bash
+# On 192.168.80.11
+sudo apt install nfs-kernel-server
+echo "/opt/zeek/logs 100.64.0.3(ro,sync,no_subtree_check)" | sudo tee -a /etc/exports
+echo "/var/log/suricata 100.64.0.3(ro,sync,no_subtree_check)" | sudo tee -a /etc/exports
+sudo exportfs -ra
+
+# On 100.64.0.3
+sudo apt install nfs-common
+sudo mkdir -p /mnt/zeek-logs /mnt/suricata
+sudo mount 192.168.80.11:/opt/zeek/logs /mnt/zeek-logs
+sudo mount 192.168.80.11:/var/log/suricata /mnt/suricata
 ```
 
-#### Step 4 — mitre-mcp
+Then set:
 
-```bash
-cd ~/mcp-servers
-git clone https://github.com/MohammedALwadiya25/Final-Year-Gradution-Project-
-cd mitre-mcp
-npm install
-```
-
-```bash
-cat > .env << 'ENVEOF'
-MITRE_MCP_PORT=3004
-MITRE_MCP_HOST=0.0.0.0
-ENVEOF
-```
-
-```bash
-npm run build
-npm start &
-
-curl http://localhost:3004/health
-# Test ATT&CK lookup:
-curl -X POST http://localhost:3004/call \
-  -H "Content-Type: application/json" \
-  -d '{"tool":"map_technique","params":{"behavior":"ssh_bruteforce"}}'
-Ctrl+C
+```env
+ZEEK_LOG_DIR=/mnt/zeek-logs/current
+ZEEK_LOG_PATH=/mnt/zeek-logs/current
+ZEEK_LOGS_DIR=/mnt/zeek-logs/current
+SURICATA_EVE_LOG=/mnt/suricata/eve.json
+EVE_JSON_PATH=/mnt/suricata/eve.json
 ```
 
 ---
 
-### 5.4 PM2 Production Configuration
+### 5.5 Integration Test — Stdio MCP Tool Discovery
 
 ```bash
-# Create PM2 ecosystem file
-cd ~/mcp-servers
-cat > ecosystem.config.js << 'PMEOF'
-module.exports = {
-  apps: [
-    {
-      name: 'zeek-mcp',
-      cwd: './zeek-mcp',
-      script: 'npm',
-      args: 'start',
-      env_file: './zeek-mcp/.env',
-      watch: false,
-      restart_delay: 3000,
-      max_restarts: 10,
-    },
-    {
-      name: 'suricata-mcp',
-      cwd: './suricata-mcp',
-      script: 'npm',
-      args: 'start',
-      env_file: './suricata-mcp/.env',
-      watch: false,
-      restart_delay: 3000,
-      max_restarts: 10,
-    },
-    {
-      name: 'wazuh-mcp',
-      cwd: './wazuh-mcp',
-      script: 'npm',
-      args: 'start',
-      env_file: './wazuh-mcp/.env',
-      watch: false,
-      restart_delay: 3000,
-      max_restarts: 10,
-    },
-    {
-      name: 'mitre-mcp',
-      cwd: './mitre-mcp',
-      script: 'npm',
-      args: 'start',
-      env_file: './mitre-mcp/.env',
-      watch: false,
-      restart_delay: 3000,
-      max_restarts: 10,
-    },
-  ],
-};
-PMEOF
+cd Final-Year-Gradution-Project-
+npm run smoke --workspace=ai-soc-agent
+```
 
-# Start all servers
-pm2 start ecosystem.config.js
+Expected result:
 
-# Verify all running
-pm2 status
-# Expected: 4 servers all showing "online"
+```
+Smoke test passed: MCP tools discovered
+```
 
-# Check logs
-pm2 logs --lines 20
+The current code should discover roughly this tool split:
 
-# Save and enable autostart
+- Zeek: 16 tools
+- Suricata: 18 tools
+- Wazuh: 11 tools
+- MITRE: 9 tools
+- Total: 54 tools in readonly mode
+
+If smoke fails before Wazuh is deployed, set temporary placeholder Wazuh values only for local tool discovery:
+
+```bash
+export WAZUH_URL=https://127.0.0.1:55000
+export WAZUH_USERNAME=dummy
+export WAZUH_PASSWORD=dummy
+export WAZUH_VERIFY_SSL=false
+npm run smoke --workspace=ai-soc-agent
+```
+
+---
+
+### 5.6 Run the AI Agent
+
+```bash
+cd Final-Year-Gradution-Project-/ai-soc-agent
+npm start
+```
+
+Verify:
+
+```bash
+curl http://localhost:3000/health
+curl http://localhost:3000/tools | python3 -m json.tool | head -40
+```
+
+Expected `/health` shape:
+
+```json
+{
+  "status": "ok",
+  "service": "ai-soc-agent",
+  "ai_provider": "gemini",
+  "model": "gemini-2.5-flash",
+  "readonly_mcp": true,
+  "tools": 54
+}
+```
+
+---
+
+### 5.7 PM2 Production Configuration
+
+Only the AI agent needs PM2. The four MCP servers are child processes created by the agent.
+
+```bash
+cd Final-Year-Gradution-Project-/ai-soc-agent
+pm2 start dist/server.js --name ai-soc-agent
+pm2 logs ai-soc-agent --lines 50
 pm2 save
 pm2 startup
-# Run the command PM2 prints
 ```
-
----
-
-### 5.5 Integration Test — All 4 Servers
-
-```bash
-# Run this from the n8n Azure VM (100.64.0.3)
-# to verify reachability over Tailscale
-
-echo "Testing zeek-mcp..."
-curl -s http://192.168.80.12:3001/health && echo " ✅ OK" || echo " ❌ FAIL"
-
-echo "Testing suricata-mcp..."
-curl -s http://192.168.80.12:3002/health && echo " ✅ OK" || echo " ❌ FAIL"
-
-echo "Testing wazuh-mcp..."
-curl -s http://192.168.80.12:3003/health && echo " ✅ OK" || echo " ❌ FAIL"
-
-echo "Testing mitre-mcp..."
-curl -s http://192.168.80.12:3004/health && echo " ✅ OK" || echo " ❌ FAIL"
-
-# All 4 must return ✅ before proceeding to Phase 4
-```
-
-> ✅ **Tip:** If a server fails to start, check `pm2 logs zeek-mcp --lines 50`. The most common error is wrong file path in `.env`. Verify the path exists with `ls -la $ZEEK_LOG_PATH`.
-
-> ⚠️ **Risk:** `npm install` may fail for a dependency. Fix with `npm install --legacy-peer-deps`. If still failing, check the `package.json` for the exact Node.js version required.
 
 ### Phase 3 Deliverables Checklist
 
 ```
-□ All 4 repos forked to your GitHub account
-□ zeek-mcp: running on port 3001, health check passes
-□ suricata-mcp: running on port 3002, health check passes
-□ wazuh-mcp: running on port 3003, health check passes, Wazuh connection verified
-□ mitre-mcp: running on port 3004, health check passes, ATT&CK lookup works
-□ PM2 managing all 4 servers with auto-restart
-□ Integration test: all 4 servers reachable from Azure VM over Tailscale
-□ PM2 save + startup configured for reboot persistence
-□ .env files backed up securely (NOT committed to GitHub)
+□ Monorepo cloned on the runtime VM
+□ npm install completed at repo root
+□ npm run build passes for all workspaces
+□ ai-soc-agent/.env created from .env.example and filled with Gemini + Wazuh values
+□ Zeek and Suricata log paths are readable from the agent VM
+□ npm run smoke --workspace=ai-soc-agent discovers MCP tools
+□ curl /health on the agent returns status ok and tool count
+□ curl /tools lists Zeek, Suricata, Wazuh, and MITRE tools
+□ PM2 manages ai-soc-agent only
+□ .env files are NOT committed to GitHub
 ```
 
 ---
 
-## 6. Phase 4 — AI Agent Development (Weeks 7–8)
+## 6. Phase 4 — AI Agent Development (Weeks 7-8)
 
 ### Objectives
-- Write and validate the system prompt in Claude.ai
-- Build and deploy the agent Node.js server
-- Test all 3 investigation paths (fast/deep/monitor)
-- Verify structured JSON output is consistent
+- Use the current built-in Gemini system prompt in `ai-soc-agent/src/prompts/systemPrompt.ts`
+- Build and deploy the existing TypeScript agent server
+- Test investigation requests through `POST /investigate`
+- Verify structured JSON output matches the current Zod schemas
 
 ---
 
-### 6.1 System Prompt (system-prompt.txt)
+### 6.1 System Prompt
 
-> **Do this before writing any code.** Open Claude.ai, paste this as a system prompt, then test with the scenarios in section 6.3.
+The current code already stores the production prompt in `ai-soc-agent/src/prompts/systemPrompt.ts`. Keep this file as the source of truth.
 
-```
-You are an expert SOC analyst for an e-commerce Network Intrusion Detection System.
-You protect an e-commerce business from: brute-force attacks, C2/malware beaconing,
-lateral movement, web application attacks (SQLi/XSS), and volumetric DDoS.
+Do not paste a separate prompt into a new `system-prompt.txt` file unless you intentionally refactor the code. The Gemini reasoner imports the prompt from TypeScript and combines it with tool definitions discovered from MCP.
 
-════════════════════════════════════════════════════════
-INVESTIGATION ARCHITECTURE
-════════════════════════════════════════════════════════
+Current decision policy:
 
-Wazuh is your PRIMARY source. It already aggregates and correlates data from
-BOTH Zeek (behavioral logs) and Suricata (signature alerts).
-A single Wazuh query gives you the merged picture of what both sensors saw.
-Do NOT query Zeek or Suricata directly unless Wazuh data is inconclusive.
-
-════════════════════════════════════════════════════════
-INVESTIGATION PROCESS — FOLLOW THIS EXACTLY
-════════════════════════════════════════════════════════
-
-STEP 1 — ALWAYS (Primary Source):
-Call wazuh-mcp → get_alerts(src_ip, time_window="10m")
-Also call wazuh-mcp → search_alerts(query=src_ip, limit=20)
-This returns the correlated picture: alert count, rules fired,
-severity levels, affected hosts.
-
-STEP 2 — ALWAYS (ATT&CK Mapping):
-Call mitre-mcp → map_technique(behavior=alert_type)
-
-STEP 3 — Calculate Preliminary Confidence from Wazuh data:
-
-Factors that INCREASE confidence:
-  + Multiple Wazuh rules firing for same src_ip  → +20
-  + Alert count > 10 in 10 minutes              → +15
-  + Multiple destination hosts targeted          → +20
-  + Wazuh severity level 10–13                  → +25
-  + Known malicious pattern in rule description → +15
-
-Factors that DECREASE confidence:
-  - Only 1 rule fired, low severity (< 6)       → -20
-  - Alert count < 3                             → -15
-  - Source IP is internal RFC1918 address       → -10
-  - Alerts only at unusual hours, no other sign → -10
-
-STEP 4 — CONDITIONAL Deep Investigation (ONLY if 40% ≤ confidence ≤ 79%):
-Wazuh data is inconclusive. Now query raw sources.
-
-For BRUTE-FORCE suspicion:
-  Call zeek-mcp → zeek_ssh_bruteforce(src_ip, threshold=5)
-
-For C2/BEACONING suspicion:
-  Call zeek-mcp → zeek_detect_beaconing(src_ip)
-  Call suricata-mcp → suricata_beaconing_detection(src_ip)
-
-For WEB ATTACK suspicion:
-  Call zeek-mcp → zeek_suspicious_http(src_ip)
-
-For LATERAL MOVEMENT suspicion:
-  Call suricata-mcp → suricata_lateral_movement_detection()
-
-For UNKNOWN suspicion:
-  Call zeek-mcp → zeek_detect_anomalies(src_ip)
-  Call suricata-mcp → suricata_query_alerts(src_ip)
-
-After deep-dive:
-  If tools CONFIRM Wazuh data  → increase confidence by 15–25
-  If tools show NOTHING        → decrease confidence by 20
-
-STEP 5 — ALWAYS (Final Decision):
-Output ONLY valid JSON. No preamble. No markdown. No explanation.
-
-════════════════════════════════════════════════════════
-DECISION RULES — NEVER DEVIATE
-════════════════════════════════════════════════════════
-
-confidence >= 80  →  action: "auto-block"
-confidence 40–79  →  action: "analyst-review"
-confidence < 40   →  action: "monitor"
-
-If Wazuh returns ZERO alerts for src_ip:
-  Set confidence to 20, action to "monitor", skip deep-dive.
-
-════════════════════════════════════════════════════════
-OUTPUT FORMAT — STRICT JSON ONLY
-════════════════════════════════════════════════════════
-
-{
-  "threat_confirmed": true | false,
-  "confidence": <integer 0-100>,
-  "action": "auto-block" | "analyst-review" | "monitor",
-  "deep_investigation_used": true | false,
-  "investigation_path": "fast-path" | "deep-path",
-  "mitre_technique": "TXXXX.XXX",
-  "mitre_tactic": "<tactic name>",
-  "threat_type": "brute-force" | "c2-beacon" | "web-attack" | "lateral-movement" | "ddos" | "unknown",
-  "src_ip": "<ip address>",
-  "affected_hosts": ["<host1>"],
-  "alert_count": <integer>,
-  "wazuh_severity": <integer>,
-  "evidence": [
-    "<evidence point 1 from Wazuh>",
-    "<evidence point 2 from Wazuh>",
-    "<evidence point 3 from deep-dive if used>"
-  ],
-  "recommended_block_duration": "1h" | "24h" | "7d" | "permanent",
-  "incident_report": "<2-3 sentence plain English summary>",
-  "processing_ms": <will be added by agent server>
-}
-```
+- Always start with Wazuh context when Wazuh tools are available
+- Always map suspected behavior to MITRE ATT&CK
+- Query Zeek and Suricata only when Wazuh/MITRE evidence is inconclusive
+- `confidence >= 80` means `auto-block`
+- `confidence 40-79` means `analyst-review`
+- `confidence < 40` means `monitor`
+- The agent only recommends action; n8n performs pfSense/Telegram/Wazuh response
 
 ---
 
 ### 6.2 Agent Code
 
-**File structure:**
+Do not create a separate `index.js` agent from this guide. The current repo already contains the TypeScript implementation:
+
 ```
-~/soc-agent/
-├── index.js
-├── system-prompt.txt   ← paste the prompt from 6.1 exactly
-├── .env
-├── package.json
-└── logs/
-    └── decisions.log
+ai-soc-agent/
+├── src/server.ts                         # Express API: /health, /tools, /investigate
+├── src/config.ts                         # Gemini, MCP stdio, Wazuh, and sensor env config
+├── src/mcp/McpHub.ts                     # Spawns all MCP servers over stdio
+├── src/llm/GeminiSocReasoner.ts          # Gemini tool-use reasoning
+├── src/prompts/systemPrompt.ts           # System prompt source of truth
+├── src/services/InvestigationService.ts  # Investigation response wrapper
+└── .env.example
 ```
 
-**package.json:**
+Use the repo scripts:
+
+```bash
+cd Final-Year-Gradution-Project-
+npm run build
+npm run smoke --workspace=ai-soc-agent
+cd ai-soc-agent
+npm start
+```
+
+The agent accepts this request shape:
+
 ```json
 {
-  "name": "soc-agent",
-  "version": "2.0.0",
-  "description": "AI SOC Agent — Wazuh-Primary Hybrid Architecture",
-  "main": "index.js",
-  "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js"
-  },
-  "dependencies": {
-    "express": "^4.18.2",
-    "dotenv": "^16.3.1",
-    "winston": "^3.11.0",
-    "node-fetch": "^2.7.0"
+  "alert_id": "test-001",
+  "src_ip": "203.0.113.55",
+  "alert_type": "ssh-bruteforce",
+  "rule_id": "100001",
+  "severity": 10,
+  "timestamp": "2026-06-07T10:00:00Z",
+  "raw_alert": {}
+}
+```
+
+The response wraps the validated SOC decision:
+
+```json
+{
+  "investigation_id": "uuid",
+  "received_at": "ISO timestamp",
+  "completed_at": "ISO timestamp",
+  "duration_ms": 8421,
+  "decision": {
+    "threat_confirmed": true,
+    "confidence": 85,
+    "action": "auto-block",
+    "mitre_technique": "T1110.001",
+    "mitre_tactic": "credential-access",
+    "src_ip": "203.0.113.55",
+    "threat_type": "brute-force",
+    "evidence": ["specific tool-backed evidence"],
+    "incident_report": "Plain English summary.",
+    "recommended_block_duration": "24h"
   }
 }
 ```
 
-**.env:**
-```bash
-# Anthropic API
-ANTHROPIC_API_KEY=sk-ant-YOUR_KEY_HERE
+Current decision schema values:
 
-# MCP Server Addresses
-ZEEK_MCP_URL=http://192.168.80.12:3001
-SURICATA_MCP_URL=http://192.168.80.12:3002
-WAZUH_MCP_URL=http://192.168.80.12:3003
-MITRE_MCP_URL=http://192.168.80.12:3004
-
-# Agent Config
-AGENT_PORT=3000
-LOG_LEVEL=info
-
-# Confidence Thresholds
-AUTO_BLOCK_THRESHOLD=80
-DEEP_DIVE_MIN=40
-DEEP_DIVE_MAX=79
-```
-
-**index.js:**
-```javascript
-require('dotenv').config();
-const express = require('express');
-const fetch   = require('node-fetch');
-const fs      = require('fs');
-const path    = require('path');
-const winston = require('winston');
-
-// ── Logger ────────────────────────────────────────────────────
-const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.json()
-  ),
-  transports: [
-    new winston.transports.Console(),
-    new winston.transports.File({ filename: './logs/decisions.log' })
-  ]
-});
-
-// ── System Prompt ─────────────────────────────────────────────
-const SYSTEM_PROMPT = fs.readFileSync(
-  path.join(__dirname, 'system-prompt.txt'), 'utf8'
-);
-
-// ── MCP Server Sets ───────────────────────────────────────────
-const MCP_PRIMARY = [
-  { type: 'url', url: process.env.WAZUH_MCP_URL,  name: 'wazuh-mcp'  },
-  { type: 'url', url: process.env.MITRE_MCP_URL,  name: 'mitre-mcp'  },
-];
-
-const MCP_DEEP = [
-  ...MCP_PRIMARY,
-  { type: 'url', url: process.env.ZEEK_MCP_URL,     name: 'zeek-mcp'     },
-  { type: 'url', url: process.env.SURICATA_MCP_URL,  name: 'suricata-mcp' },
-];
-
-// ── Thresholds ────────────────────────────────────────────────
-const AUTO_BLOCK = parseInt(process.env.AUTO_BLOCK_THRESHOLD) || 80;
-const DEEP_MIN   = parseInt(process.env.DEEP_DIVE_MIN)        || 40;
-const DEEP_MAX   = parseInt(process.env.DEEP_DIVE_MAX)        || 79;
-
-// ── Claude API Call ───────────────────────────────────────────
-async function callClaude(userMessage, useDeepPath = false) {
-  const mcp_servers = useDeepPath ? MCP_DEEP : MCP_PRIMARY;
-
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': process.env.ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01',
-      'anthropic-beta': 'mcp-client-2025-04-04'
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: userMessage }],
-      mcp_servers
-    })
-  });
-
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Claude API error ${response.status}: ${err}`);
-  }
-
-  return response.json();
-}
-
-// ── Parse Decision ────────────────────────────────────────────
-function parseDecision(data) {
-  const text = data.content
-    .filter(block => block.type === 'text')
-    .map(block => block.text)
-    .join('');
-
-  // Strip markdown fences if present
-  const clean = text.replace(/```json|```/g, '').trim();
-
-  try {
-    return JSON.parse(clean);
-  } catch (e) {
-    logger.error('JSON parse failed', { raw: clean.slice(0, 300) });
-    throw new Error('Agent returned invalid JSON: ' + clean.slice(0, 200));
-  }
-}
-
-// ── Main Investigation Logic ──────────────────────────────────
-async function investigate(alertData) {
-  const { alert_id, src_ip, alert_type, wazuh_rule_id, timestamp } = alertData;
-  const startTime = Date.now();
-
-  logger.info('Investigation started', { alert_id, src_ip, alert_type });
-
-  // Phase 1: Fast path — always runs first
-  const fastPrompt = `
-    Investigate this security alert:
-    - Source IP:     ${src_ip}
-    - Alert Type:    ${alert_type}
-    - Wazuh Rule ID: ${wazuh_rule_id}
-    - Alert ID:      ${alert_id}
-    - Timestamp:     ${timestamp}
-
-    Follow your investigation process.
-    Use wazuh-mcp and mitre-mcp first.
-    If confidence lands between ${DEEP_MIN}% and ${DEEP_MAX}%,
-    set deep_investigation_used: true and also call zeek-mcp
-    and suricata-mcp tools for behavioral analysis.
-    Output only the final JSON decision.
-  `;
-
-  let data     = await callClaude(fastPrompt, false);
-  let decision = parseDecision(data);
-
-  // Phase 2: Deep path if confidence is ambiguous
-  if (decision.confidence >= DEEP_MIN && decision.confidence <= DEEP_MAX) {
-    logger.info('Ambiguous — escalating to deep path', {
-      src_ip,
-      preliminary_confidence: decision.confidence
-    });
-
-    const deepPrompt = `
-      PRELIMINARY RESULT (wazuh-mcp + mitre-mcp):
-      ${JSON.stringify(decision, null, 2)}
-
-      Confidence is ${decision.confidence}% — inconclusive.
-      Now use zeek-mcp and suricata-mcp for behavioral deep-dive.
-      Focus on threat type: ${decision.threat_type}
-      Source IP: ${src_ip}
-
-      After deep investigation, output the FINAL JSON decision.
-      Update confidence and evidence based on what deep-dive found.
-    `;
-
-    data     = await callClaude(deepPrompt, true);
-    decision = parseDecision(data);
-    decision.investigation_path = 'deep-path';
-  } else {
-    decision.investigation_path = 'fast-path';
-  }
-
-  // Add timing metadata
-  decision.alert_id        = alert_id;
-  decision.processing_ms   = Date.now() - startTime;
-  decision.investigated_at = new Date().toISOString();
-
-  logger.info('Investigation complete', {
-    alert_id,
-    src_ip,
-    action:     decision.action,
-    confidence: decision.confidence,
-    path:       decision.investigation_path,
-    ms:         decision.processing_ms
-  });
-
-  return decision;
-}
-
-// ── Express Server ────────────────────────────────────────────
-const app = express();
-app.use(express.json());
-
-// Health check
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    version: '2.0-hybrid',
-    thresholds: { auto_block: AUTO_BLOCK, deep_min: DEEP_MIN, deep_max: DEEP_MAX },
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Main investigation endpoint — called by n8n
-app.post('/investigate', async (req, res) => {
-  const { alert_id, src_ip, alert_type, wazuh_rule_id, timestamp } = req.body;
-
-  if (!src_ip || !alert_type) {
-    return res.status(400).json({
-      error: 'Missing required fields: src_ip, alert_type'
-    });
-  }
-
-  try {
-    const decision = await investigate({
-      alert_id:      alert_id || `auto-${Date.now()}`,
-      src_ip,
-      alert_type,
-      wazuh_rule_id: wazuh_rule_id || 'unknown',
-      timestamp:     timestamp || new Date().toISOString()
-    });
-    res.json(decision);
-
-  } catch (err) {
-    logger.error('Investigation failed', { error: err.message, src_ip });
-    // Safe fallback — never fail silently, always escalate to analyst
-    res.status(500).json({
-      error:      'Investigation failed',
-      message:    err.message,
-      action:     'analyst-review',
-      confidence: 0,
-      src_ip,
-      incident_report: 'Agent error — manual investigation required.'
-    });
-  }
-});
-
-// Create logs directory
-if (!fs.existsSync('./logs')) fs.mkdirSync('./logs');
-
-const PORT = process.env.AGENT_PORT || 3000;
-app.listen(PORT, () => {
-  logger.info(`AI SOC Agent v2.0 running on port ${PORT}`);
-  logger.info('Architecture: Wazuh-Primary Hybrid');
-  logger.info(`Thresholds: auto-block≥${AUTO_BLOCK}% | deep-dive ${DEEP_MIN}-${DEEP_MAX}%`);
-});
-```
+- `action`: `auto-block`, `analyst-review`, or `monitor`
+- `threat_type`: `brute-force`, `c2`, `lateral-movement`, `web-attack`, `ddos`, or `unknown`
+- `recommended_block_duration`: `none`, `1h`, `24h`, `7d`, or `permanent`
 
 ---
 
@@ -1509,93 +1162,85 @@ app.listen(PORT, () => {
 ```bash
 # Install Node.js 20
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt-get install -y nodejs
-node --version   # v20.x.x
+sudo apt-get install -y nodejs git
 
-# Install PM2
-sudo npm install -g pm2
-
-# Create agent directory and files
-mkdir -p ~/soc-agent/logs
-cd ~/soc-agent
-
-# Create all 4 files:
-# - index.js         (copy from section 6.2)
-# - system-prompt.txt (copy from section 6.1)
-# - package.json     (copy from section 6.2)
-# - .env             (copy from section 6.2 — fill in your API key)
-
+# Clone and build current repo
+git clone https://github.com/MohammedALwadiya25/Final-Year-Gradution-Project-.git
+cd Final-Year-Gradution-Project-
 npm install
+npm run build
+
+# Configure
+cp ai-soc-agent/.env.example ai-soc-agent/.env
+nano ai-soc-agent/.env
 
 # Start with PM2
-pm2 start index.js --name soc-agent
-pm2 save
-pm2 startup   # run the command it prints
+cd ai-soc-agent
+pm2 start dist/server.js --name ai-soc-agent
+pm2 logs ai-soc-agent --lines 50
 
-# Verify health
+# Verify health and tool discovery
 curl http://localhost:3000/health
+curl http://localhost:3000/tools | python3 -m json.tool | head -40
 ```
 
 ---
 
 ### 6.4 Test Scenarios
 
-**Test all 3 paths before connecting n8n:**
+The endpoint calls Gemini and the MCP tools, so these tests require `GEMINI_API_KEY`, Wazuh configuration, and readable sensor paths.
 
 ```bash
-# TEST 1 — Fast path, auto-block (confidence should be ≥80)
+# TEST 1 — Fast path, auto-block candidate
 curl -X POST http://localhost:3000/investigate \
   -H "Content-Type: application/json" \
   -d '{
     "alert_id": "TEST-001",
     "src_ip": "203.0.113.55",
-    "alert_type": "SSH Brute Force",
-    "wazuh_rule_id": "100001",
+    "alert_type": "ssh-bruteforce",
+    "rule_id": "100001",
+    "severity": 10,
     "timestamp": "2026-06-07T14:23:00Z"
   }'
-# Expected: action: "auto-block", investigation_path: "fast-path"
 
-# TEST 2 — Deep path (confidence should be 40-79, triggering deep-dive)
+# TEST 2 — Ambiguous suspicious outbound candidate
 curl -X POST http://localhost:3000/investigate \
   -H "Content-Type: application/json" \
   -d '{
     "alert_id": "TEST-002",
     "src_ip": "198.51.100.22",
-    "alert_type": "Suspicious outbound connection",
-    "wazuh_rule_id": "31101",
+    "alert_type": "suspicious-outbound",
+    "rule_id": "31101",
+    "severity": 6,
     "timestamp": "2026-06-07T03:15:00Z"
   }'
-# Expected: deep_investigation_used: true, investigation_path: "deep-path"
 
-# TEST 3 — Monitor (confidence should be <40)
+# TEST 3 — Low severity monitor candidate
 curl -X POST http://localhost:3000/investigate \
   -H "Content-Type: application/json" \
   -d '{
     "alert_id": "TEST-003",
     "src_ip": "192.168.80.50",
-    "alert_type": "Web scan detected",
-    "wazuh_rule_id": "31151",
+    "alert_type": "web-scan",
+    "rule_id": "31151",
+    "severity": 3,
     "timestamp": "2026-06-07T09:00:00Z"
   }'
-# Expected: action: "monitor", investigation_path: "fast-path"
 ```
 
-> ✅ **Tip:** All 3 test scenarios must pass before connecting n8n. Especially verify the deep-path test returns `deep_investigation_used: true` — this confirms the two-phase logic is working.
-
-> ⚠️ **Risk:** If JSON parsing fails, add `console.log(text)` before `JSON.parse(clean)` to see the raw Claude response. The most common issue is Claude adding a preamble sentence before the JSON.
+Check the returned `decision.action`, `decision.confidence`, `decision.evidence`, and `duration_ms`. The code does not currently return top-level `investigation_path` or `deep_investigation_used`; do not make n8n depend on those fields unless they are added to the implementation.
 
 ### Phase 4 Deliverables Checklist
 
 ```
-□ system-prompt.txt tested in Claude.ai with all 3 test scenarios
-□ All 4 agent files created: index.js, system-prompt.txt, package.json, .env
-□ npm install completes without errors
+□ ai-soc-agent/src/prompts/systemPrompt.ts reviewed and matches the thesis policy
+□ npm run build passes
+□ npm run smoke --workspace=ai-soc-agent discovers MCP tools
 □ Agent running on Azure VM port 3000 via PM2
-□ /health endpoint returns correct JSON
-□ TEST-001 returns action: "auto-block" and investigation_path: "fast-path"
-□ TEST-002 returns deep_investigation_used: true and investigation_path: "deep-path"
-□ TEST-003 returns action: "monitor"
-□ decisions.log file generating entries for each test
+□ /health endpoint returns current JSON shape
+□ /tools endpoint lists all allowed readonly MCP tools
+□ /investigate returns an InvestigationResponse with a nested decision object
+□ n8n workflow reads fields from decision.action, decision.confidence, and decision.src_ip
 ```
 
 ---
@@ -1698,8 +1343,9 @@ Fields to set:
   src_ip       = {{ $json.body.data.srcip }}
   alert_type   = {{ $json.body.rule.description }}
   alert_id     = {{ $json.body.id }}
-  wazuh_rule_id = {{ $json.body.rule.id }}
+  rule_id      = {{ $json.body.rule.id }}
   timestamp    = {{ $json.body.timestamp }}
+  raw_alert    = {{ $json.body }}
 ```
 
 **Node 3 — Call AI Agent**
@@ -1713,8 +1359,9 @@ Body:
   "alert_id": "{{ $json.alert_id }}",
   "src_ip": "{{ $json.src_ip }}",
   "alert_type": "{{ $json.alert_type }}",
-  "wazuh_rule_id": "{{ $json.wazuh_rule_id }}",
-  "timestamp": "{{ $json.timestamp }}"
+  "rule_id": "{{ $json.rule_id }}",
+  "timestamp": "{{ $json.timestamp }}",
+  "raw_alert": {{ JSON.stringify($json.raw_alert) }}
 }
 Timeout: 60000 (60 seconds)
 ```
@@ -1723,13 +1370,15 @@ Timeout: 60000 (60 seconds)
 ```
 Type: Set
 Fields:
-  confidence   = {{ $json.confidence }}
-  action       = {{ $json.action }}
-  mitre        = {{ $json.mitre_technique }}
-  report       = {{ $json.incident_report }}
-  threat_type  = {{ $json.threat_type }}
-  block_duration = {{ $json.recommended_block_duration }}
-  inv_path     = {{ $json.investigation_path }}
+  investigation_id = {{ $json.investigation_id }}
+  duration_ms      = {{ $json.duration_ms }}
+  confidence       = {{ $json.decision.confidence }}
+  action           = {{ $json.decision.action }}
+  src_ip           = {{ $json.decision.src_ip }}
+  mitre            = {{ $json.decision.mitre_technique }}
+  report           = {{ $json.decision.incident_report }}
+  threat_type      = {{ $json.decision.threat_type }}
+  block_duration   = {{ $json.decision.recommended_block_duration }}
 ```
 
 **Node 5 — Confidence Switch**
@@ -1808,7 +1457,7 @@ Text:
 🎯 Confidence: {{ $('Parse Agent Decision').item.json.confidence }}%
 ⚡ Action:     {{ $('Parse Agent Decision').item.json.action | upper }}
 🗺️ MITRE:      {{ $('Parse Agent Decision').item.json.mitre }}
-🔍 Path:       {{ $('Parse Agent Decision').item.json.inv_path }}
+⏱ Duration:   {{ $('Parse Agent Decision').item.json.duration_ms }}ms
 
 📋 Report:
 {{ $('Parse Agent Decision').item.json.report }}
@@ -1847,7 +1496,8 @@ Body:
   "action": "{{ $('Parse Agent Decision').item.json.action }}",
   "confidence": {{ $('Parse Agent Decision').item.json.confidence }},
   "mitre_technique": "{{ $('Parse Agent Decision').item.json.mitre }}",
-  "investigation_path": "{{ $('Parse Agent Decision').item.json.inv_path }}",
+  "duration_ms": {{ $('Parse Agent Decision').item.json.duration_ms }},
+  "investigation_id": "{{ $('Parse Agent Decision').item.json.investigation_id }}",
   "incident_report": "{{ $('Parse Agent Decision').item.json.report }}",
   "timestamp": "{{ $now }}"
 }
@@ -2058,10 +1708,10 @@ For every attack run, record in a spreadsheet:
 | attack_name            | e.g. "SSH Brute Force"                          |
 | attack_start_time      | echo $(date -u) before running attack tool      |
 | wazuh_alert_time       | Wazuh dashboard alert timestamp                 |
-| agent_decision_time    | decisions.log → investigated_at field           |
-| action_taken           | decisions.log → action field                    |
-| confidence             | decisions.log → confidence field                |
-| investigation_path     | decisions.log → investigation_path field        |
+| agent_decision_time    | agent response `completed_at` timestamp         |
+| action_taken           | agent response `decision.action` field          |
+| confidence             | agent response `decision.confidence` field      |
+| duration_ms            | agent response `duration_ms` field              |
 | block_applied_time     | n8n execution log timestamp                     |
 | correct_decision       | Yes/No (manual review)                          |
 | MTTD (seconds)         | wazuh_alert_time - attack_start_time            |
@@ -2160,8 +1810,8 @@ Chapter 8 — Conclusion and Future Work
 | Risk | Severity | Mitigation |
 |---|---|---|
 | Laptop powers off during live demo | 🔴 HIGH | Record a backup video in Week 11. Never rely solely on live demo for your defense. |
-| Claude API returns non-JSON response | 🟠 MEDIUM | Strip markdown fences before `JSON.parse`. Log raw response on every failure for debugging. |
-| Claude API down during thesis defense | 🔴 HIGH | Pre-recorded backup video. Test demo setup 48 hours before defense. Always have Plan B. |
+| Gemini API returns non-JSON response | 🟠 MEDIUM | Strip markdown fences before `JSON.parse`. Log raw response on every failure for debugging. |
+| Gemini API down during thesis defense | 🔴 HIGH | Pre-recorded backup video. Test demo setup 48 hours before defense. Always have Plan B. |
 | pfSense permanently blocks your Kali IP | 🔴 HIGH | Add a permanent ALLOW rule at the TOP of pfSense rules for Tailscale IPs before any attack testing. |
 | Azure costs exceed student budget | 🟡 LOW | Set billing alert at $20. Stop Azure VMs when not actively testing. Use `az vm deallocate`. |
 | MCP server reads stale Zeek logs | 🟠 MEDIUM | Always point `ZEEK_LOG_PATH` to `/opt/zeek/logs/current/` symlink, never to a dated directory. |
@@ -2186,7 +1836,7 @@ Service                Purpose                              Free Tier Limit
 ────────────────────────────────────────────────────────────────────────────
 tailscale.com          Hybrid networking (Subnet Router)    100 devices
 portal.azure.com       Cloud VMs (Wazuh + n8n + Kali)      $200 free credit
-console.anthropic.com  Claude API key — agent brain         Pay per token (~$0.003/1K)
+aistudio.google.com    Gemini API key — agent brain        Free-tier friendly
 abuseipdb.com          Threat intel enrichment              1,000 checks/day
 virustotal.com         Threat intel enrichment              500 requests/day
 Telegram @BotFather    Create SOC Alert Bot                 Free
@@ -2254,14 +1904,14 @@ Phase 6:
 
 | Metric | Formula | Minimum Target | How to Measure |
 |---|---|---|---|
-| Detection Rate (DR) | Attacks detected / 5 × 100 | ≥ 80% | Count `threat_confirmed: true` in decisions.log |
+| Detection Rate (DR) | Attacks detected / 5 × 100 | ≥ 80% | Count `decision.threat_confirmed: true` in agent/n8n responses |
 | False Positive Rate (FPR) | Wrong auto-blocks / total auto-blocks × 100 | ≤ 15% | Manual review of each auto-block decision |
 | Mean Time to Detect (MTTD) | avg(wazuh\_alert\_time − attack\_start\_time) | ≤ 60 seconds | Spreadsheet calculation |
 | Mean Time to Respond (MTTR) | avg(block\_applied\_time − wazuh\_alert\_time) | ≤ 30 seconds | n8n execution log timestamps |
 | Agent Accuracy | Correct decisions / total decisions × 100 | ≥ 85% | Compare action vs expected action per scenario |
 | AI vs Baseline DR Delta | AI DR − Suricata-only DR | Positive value | Baseline run vs full pipeline run |
-| Fast-path avg response | avg(processing\_ms) where path = fast-path | ≤ 5,000 ms | Filter decisions.log by investigation\_path |
-| Deep-path avg response | avg(processing\_ms) where path = deep-path | ≤ 15,000 ms | Filter decisions.log by investigation\_path |
+| Agent avg response | avg(`duration_ms`) across investigation responses | ≤ 15,000 ms | Use agent responses or n8n execution logs |
+| Tool discovery health | `/health` and `/tools` return all expected MCP tools | 54 readonly tools | `curl /health` and `curl /tools` |
 
 ---
 
@@ -2350,12 +2000,10 @@ LOCAL VMWARE NETWORK (192.168.80.0/24)
                   EVE JSON:    /var/log/suricata/eve.json
                   Wazuh agent: enrolled to 100.64.0.2
 
-192.168.80.12   MCP Servers
-                  zeek-mcp:     http://192.168.80.12:3001
-                  suricata-mcp: http://192.168.80.12:3002
-                  wazuh-mcp:    http://192.168.80.12:3003
-                  mitre-mcp:    http://192.168.80.12:3004
-                  PM2 logs:     pm2 logs --lines 50
+192.168.80.12   Optional runtime/helper VM
+                  Current code does not expose MCP HTTP ports.
+                  If used, it should run the monorepo and ai-soc-agent,
+                  or provide mounted sensor logs to the agent VM.
 
 192.168.80.13   DVWA Web Server (DMZ)
                   HTTP:        http://192.168.80.13
@@ -2407,20 +2055,16 @@ sudo systemctl status wazuh-agent          # Wazuh agent status
 tail -f /opt/zeek/logs/current/conn.log    # Live Zeek traffic
 tail -f /var/log/suricata/eve.json         # Live Suricata alerts
 
-# On 192.168.80.12 (MCP VM)
-pm2 status                                  # All MCP servers
-pm2 logs --lines 20                         # Recent logs
-curl http://localhost:3001/health           # zeek-mcp health
-curl http://localhost:3002/health           # suricata-mcp health
-curl http://localhost:3003/health           # wazuh-mcp health
-curl http://localhost:3004/health           # mitre-mcp health
+# MCP servers
+# Current code uses stdio child processes spawned by ai-soc-agent.
+# Check them through the agent instead of ports 3001-3004.
 
 # On 100.64.0.3 (Azure — n8n + Agent VM)
 pm2 status                                  # Agent status
-pm2 logs soc-agent --lines 20              # Agent logs
+pm2 logs ai-soc-agent --lines 20           # Agent logs
 curl http://localhost:3000/health           # Agent health
+curl http://localhost:3000/tools            # MCP tool discovery through agent
 sudo systemctl status n8n                   # n8n status
-cat ~/soc-agent/logs/decisions.log | tail -20  # Decision history
 
 # On 100.64.0.2 (Wazuh VM)
 sudo systemctl status wazuh-manager        # Wazuh manager
@@ -2441,8 +2085,8 @@ tailscale ping 192.168.80.11               # Test latency to Zeek VM
 ```
 Before every test session:
   □ Tailscale status shows all peers connected
-  □ pm2 status on MCP VM shows 4 servers online
-  □ pm2 status on Agent VM shows soc-agent online
+  □ curl /tools on agent lists Zeek, Suricata, Wazuh, and MITRE tools
+  □ pm2 status on Agent VM shows ai-soc-agent online
   □ curl /health on agent returns {"status":"ok"}
   □ Wazuh dashboard accessible
   □ n8n workflow is active (toggle in n8n GUI)
@@ -2452,9 +2096,9 @@ Before every test session:
   □ Suricata running (check eve.json timestamp < 1 min ago)
 
 After every test session:
-  □ Copy decisions.log entry to metrics spreadsheet
+  □ Copy agent response or n8n execution output to metrics spreadsheet
   □ Note attack_start, wazuh_alert, agent_decision, block_applied timestamps
-  □ Record confidence, action, investigation_path
+  □ Record confidence, action, and duration_ms
   □ Verify pfSense blocklist (remove test IPs if needed for next test)
   □ Take VM snapshot if major changes were made
 ```
@@ -2464,5 +2108,5 @@ After every test session:
 *Document Version 1.0 — June 2026*  
 *Generated from full discovery + design session*  
 *Project: AI-Powered SOC Agent NIDS for E-Commerce Infrastructure*  
-*Stack: pfSense · Zeek · Suricata · Wazuh · n8n · Claude API · MCP Servers*  
+*Stack: pfSense · Zeek · Suricata · Wazuh · n8n · Google Gemini · MCP Servers*  
 *Network: VMware Workstation + Azure + Tailscale Zero Trust Mesh*
