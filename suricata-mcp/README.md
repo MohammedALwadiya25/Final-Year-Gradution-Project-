@@ -141,7 +141,6 @@ npm run test:watch # Watch mode
 | `suricata_rule_stats` | Rule set statistics: total, enabled/disabled, by action, by classtype |
 | `suricata_create_rule` | Write a custom rule to local.rules |
 | `suricata_toggle_rule` | Enable or disable a rule by SID |
-| `suricata_reload_rules_docker` | Reload rules via Docker (suricata-update + SIGUSR2) |
 
 ### Suricata Engine & Live Commands (3 tools)
 
