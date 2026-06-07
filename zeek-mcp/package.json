@@ -4,9 +4,6 @@
   "description": "Modified Zeek MCP server for the AI-powered SOC/NIDS graduation project.",
   "type": "module",
   "main": "dist/index.js",
-  "bin": {
-    "zeek-mcp": "dist/index.js"
-  },
   "scripts": {
     "build": "tsup",
     "dev": "tsx watch src/index.ts",
@@ -15,7 +12,6 @@
     "test:watch": "vitest",
     "lint": "tsc --noEmit",
     "generate-logs": "tsx scripts/generate-zeek-logs.ts",
-    "prepublishOnly": "npm run typecheck && npm test && npm run build",
     "typecheck": "tsc --noEmit"
   },
   "engines": {
@@ -32,10 +28,5 @@
     "tsx": "^4.19.3",
     "typescript": "^6.0.3",
     "vitest": "^4.1.5"
-  },
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
-  ]
+  }
 }
