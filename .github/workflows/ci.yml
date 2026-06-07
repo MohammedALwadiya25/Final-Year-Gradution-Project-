@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  # ── Build + Test each MCP server ──────────────────────────────
+  zeek-mcp:
+    name: zeek-mcp (build + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: zeek-mcp
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: zeek-mcp/package-lock.json
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+  suricata-mcp:
+    name: suricata-mcp (build + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: suricata-mcp
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: suricata-mcp/package-lock.json
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+  wazuh-mcp:
+    name: wazuh-mcp (build + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: wazuh-mcp
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: wazuh-mcp/package-lock.json
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+  mitre-mcp:
+    name: mitre-mcp (build + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mitre-mcp
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: mitre-mcp/package-lock.json
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+  ai-soc-agent:
+    name: ai-soc-agent (build + typecheck)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ai-soc-agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: ai-soc-agent/package-lock.json
+
+      - run: npm ci
+      - run: npm run build
+
+  # ── Final status gate ──────────────────────────────────────────
+  all-checks:
+    name: All checks passed
+    runs-on: ubuntu-latest
+    needs: [zeek-mcp, suricata-mcp, wazuh-mcp, mitre-mcp, ai-soc-agent]
+    steps:
+      - run: echo "✅ All packages built and tested successfully."
