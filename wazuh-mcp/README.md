@@ -169,62 +169,6 @@ Tool responses are capped by `WAZUH_MCP_MAX_RESPONSE_BYTES`. Oversized responses
 
 Transient manager `GET` requests and indexer search/readiness requests retry briefly on `429`, `502`, `503`, `504`, and common transient network reset or timeout errors.
 
-## Usage
-
-### Claude Desktop
-
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
-
-```json
-{
-  "mcpServers": {
-    "wazuh": {
-      "command": "wazuh-mcp",
-      "env": {
-        "WAZUH_URL": "https://your-wazuh-manager:55000",
-        "WAZUH_USERNAME": "wazuh-wui",
-        "WAZUH_PASSWORD": "your-password",
-        "WAZUH_INDEXER_URL": "https://your-wazuh-indexer:9200",
-        "WAZUH_INDEXER_USERNAME": "admin",
-        "WAZUH_INDEXER_PASSWORD": "your-indexer-password"
-      }
-    }
-  }
-}
-```
-
-### Claude Code
-
-```bash
-claude mcp add wazuh \
-  --env WAZUH_URL=https://your-wazuh-manager:55000 \
-  --env WAZUH_USERNAME=wazuh-wui \
-  --env WAZUH_PASSWORD=your-password \
-  --env WAZUH_INDEXER_URL=https://your-wazuh-indexer:9200 \
-  --env WAZUH_INDEXER_USERNAME=admin \
-  --env WAZUH_INDEXER_PASSWORD=your-indexer-password \
-  -- wazuh-mcp
-```
-
-Add `--scope user` to make it available from any directory instead of only the current project.
-
-### Standalone
-
-```bash
-export WAZUH_URL=https://your-wazuh-manager:55000
-export WAZUH_USERNAME=wazuh-wui
-export WAZUH_PASSWORD=your-password
-npm start
-```
-
-### Development
-
-```bash
-npm run dev    # Watch mode with tsx
-npm run lint   # Type checking
-npm test       # Run tests
-```
-
 ## MCP Tools
 
 ### Agent Tools
