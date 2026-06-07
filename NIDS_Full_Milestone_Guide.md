@@ -287,7 +287,7 @@ sudo nano /opt/zeek/share/zeek/site/local.zeek
 @load policy/protocols/dns/detect-external-names
 @load policy/frameworks/notice/weird
 @load policy/misc/detect-traceroute
-@load frameworks/files/hash-all-files
+@load policy/frameworks/files/hash-all-files
 ```
 
 ```bash
@@ -452,8 +452,8 @@ curl http://100.64.0.3:3000/health
 # Minimum: 4 CPU / 8 GB RAM / 100 GB disk
 
 # Download Wazuh installer
-curl -sO https://packages.wazuh.com/4.7/wazuh-install.sh
-curl -sO https://packages.wazuh.com/4.7/config.yml
+curl -sO https://packages.wazuh.com/4.x/wazuh-install.sh
+curl -sO https://packages.wazuh.com/4.x/config.yml
 
 # Edit config.yml with your server details
 nano config.yml
@@ -494,7 +494,7 @@ sudo /var/ossec/bin/manage_agents
 
 # On 192.168.80.11 (Zeek VM) — install agent
 curl -so wazuh-agent.deb \
-  https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_4.7.0-1_amd64.deb
+  "https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/$(curl -s https://packages.wazuh.com/4.x/apt/dists/stable/main/binary-amd64/Packages | grep -m1 'Filename:.*wazuh-agent.*amd64.deb' | awk '{print $2}' | xargs basename)"
 sudo WAZUH_MANAGER='100.64.0.2' dpkg -i ./wazuh-agent.deb
 sudo systemctl daemon-reload
 sudo systemctl enable wazuh-agent
@@ -748,10 +748,12 @@ sudo nano /var/ossec/etc/rules/local_rules.xml
   </rule>
 
   <!-- RULE 6: High Severity Composite — fires Wazuh webhook -->
-  <!-- Aggregates any rule 100001-100005 for webhook trigger -->
-  <rule id="100010" level="15" frequency="1" timeframe="10">
-    <if_matched_rule_id>100001,100002,100003,100004,100005</if_matched_rule_id>
-    <description>HIGH SEVERITY NIDS EVENT: $(rule.description) — Triggering SOAR</description>
+  <!-- Aggregates any alert from the custom_nids group for webhook trigger    -->
+  <!-- NOTE: if_matched_rule_id only accepts a single ID in Wazuh XML.        -->
+  <!-- Use if_matched_group targeting the group defined on rules 100001-100005 -->
+  <rule id="100010" level="15" frequency="2" timeframe="30">
+    <if_matched_group>custom_nids</if_matched_group>
+    <description>HIGH SEVERITY NIDS EVENT — Triggering SOAR</description>
     <group>soar_trigger,high_severity,</group>
   </rule>
 
@@ -774,6 +776,36 @@ sudo /var/ossec/bin/ossec-logtest -V | grep "Rules loaded"
 ```
 
 **Configure Wazuh webhook (to trigger n8n):**
+
+Wazuh's `<integration>` block with `<name>custom-webhook</name>` requires an executable script at `/var/ossec/integrations/custom-webhook`. Create it first:
+
+```bash
+sudo tee /var/ossec/integrations/custom-webhook << 'SCRIPT'
+#!/usr/bin/env python3
+# Wazuh custom webhook integration — forwards alert JSON to n8n
+import sys, json, urllib.request, os
+
+alert_file  = sys.argv[1]
+hook_url    = sys.argv[3]
+
+with open(alert_file) as f:
+    alert_json = json.load(f)
+
+data = json.dumps(alert_json).encode("utf-8")
+req = urllib.request.Request(
+    hook_url,
+    data=data,
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+urllib.request.urlopen(req, timeout=10)
+SCRIPT
+sudo chmod 750 /var/ossec/integrations/custom-webhook
+sudo chown root:wazuh /var/ossec/integrations/custom-webhook
+```
+
+Then add the integration config:
+
 ```bash
 sudo nano /var/ossec/etc/ossec.conf
 ```
@@ -783,7 +815,7 @@ sudo nano /var/ossec/etc/ossec.conf
 <integration>
   <name>custom-webhook</name>
   <hook_url>http://100.64.0.3:5678/webhook/wazuh-alert</hook_url>
-  <level>12</level>
+  <level>10</level>
   <rule_id>100001,100002,100003,100004,100005,100010</rule_id>
   <alert_format>json</alert_format>
 </integration>
@@ -1281,10 +1313,14 @@ Environment=N8N_PORT=5678
 Environment=N8N_HOST=0.0.0.0
 Environment=N8N_PROTOCOL=http
 Environment=WEBHOOK_URL=http://100.64.0.3:5678
+# NOTE: N8N_BASIC_AUTH_ACTIVE was deprecated in n8n v1.0.
+# n8n v1+ uses built-in user management. On first launch, go to
+# http://100.64.0.3:5678 and create an owner account via the setup wizard.
+# The environment vars below are kept for n8n <1.0 compatibility only.
 Environment=N8N_BASIC_AUTH_ACTIVE=true
 Environment=N8N_BASIC_AUTH_USER=admin
 Environment=N8N_BASIC_AUTH_PASSWORD=YOUR_SECURE_PASSWORD
-ExecStart=/usr/bin/n8n start
+ExecStart=/usr/bin/env n8n start
 Restart=always
 RestartSec=10
 
@@ -1451,11 +1487,11 @@ Credential: Your Bot Token
 Operation: Send Message
 Chat ID: YOUR_CHAT_ID
 Text:
-🚨 SECURITY ALERT — {{ $('Parse Agent Decision').item.json.threat_type | upper }}
+🚨 SECURITY ALERT — {{ $('Parse Agent Decision').item.json.threat_type.toUpperCase() }}
 
 📍 Source IP:  {{ $('Parse Agent Decision').item.json.src_ip }}
 🎯 Confidence: {{ $('Parse Agent Decision').item.json.confidence }}%
-⚡ Action:     {{ $('Parse Agent Decision').item.json.action | upper }}
+⚡ Action:     {{ $('Parse Agent Decision').item.json.action.toUpperCase() }}
 🗺️ MITRE:      {{ $('Parse Agent Decision').item.json.mitre }}
 ⏱ Duration:   {{ $('Parse Agent Decision').item.json.duration_ms }}ms
 
