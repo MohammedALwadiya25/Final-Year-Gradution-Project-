@@ -140,58 +140,6 @@ npm run lint       # Type-check
 | `MISP_API_KEY` | MISP API key (authkey) |
 | `MISP_VERIFY_SSL` | Verify SSL certs (default: `true`, set `false` for self-signed) |
 
-## Usage
-
-### Claude Desktop
-
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
-
-```json
-{
-  "mcpServers": {
-    "mitre-attack": {
-      "command": "mitre-mcp",
-      "env": {
-        "MITRE_MATRICES": "enterprise",
-        "WAZUH_URL": "https://wazuh.example.internal:55000",
-        "WAZUH_USERNAME": "wazuh-wui",
-        "WAZUH_PASSWORD": "your-password",
-        "WAZUH_VERIFY_SSL": "false",
-        "THEHIVE_URL": "http://thehive.example.internal:9000",
-        "THEHIVE_API_KEY": "your-api-key",
-        "CORTEX_URL": "http://cortex.example.internal:9001",
-        "CORTEX_API_KEY": "your-api-key",
-        "MISP_URL": "https://misp.example.internal",
-        "MISP_API_KEY": "your-api-key",
-        "MISP_VERIFY_SSL": "false"
-      }
-    }
-  }
-}
-```
-
-### Claude Code
-
-```bash
-claude mcp add mitre-attack \
-  --env MITRE_MATRICES=enterprise \
-  -- mitre-mcp
-```
-
-Add `--scope user` to make it available from any directory instead of only the current project. Add `--env` flags for any SOC integrations (Wazuh, TheHive, Cortex, MISP) you want to enable.
-
-### Standalone
-
-```bash
-npm run start
-```
-
-### Development
-
-```bash
-npm run dev
-```
-
 ## Tool Reference
 
 ### Core ATT&CK Tools (19)
