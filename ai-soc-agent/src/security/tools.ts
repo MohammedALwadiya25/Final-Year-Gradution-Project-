@@ -14,8 +14,6 @@ const blockedWriteWords = [
   "write",
 ];
 
-const blockedIntegrations = ["thehive", "misp", "cortex"];
-
 const thesisToolAllowlist = new Set([
   "zeek__zeek_query_connections",
   "zeek__zeek_connection_summary",
@@ -78,7 +76,7 @@ export function isToolAllowed(agentToolName: string, originalToolName: string, r
   if (!readonly) return true;
 
   const normalized = originalToolName.toLowerCase();
-  return ![...blockedWriteWords, ...blockedIntegrations].some((word) =>
+  return !blockedWriteWords.some((word) =>
     normalized.includes(word),
   );
 }
