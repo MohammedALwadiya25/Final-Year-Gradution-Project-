@@ -1,0 +1,21 @@
+node_modules/
+dist/
+coverage/
+*.log
+
+.env
+.env.*
+!.env.example
+
+# Generated local data/cache
+mitre-mcp/test-data/mitre-cache/
+**/.mitre-mcp/
+
+# Local agent/tooling state
+.claude/
+.codex/
+.learnings/
+
+# OS/editor files
+.DS_Store
+Thumbs.db

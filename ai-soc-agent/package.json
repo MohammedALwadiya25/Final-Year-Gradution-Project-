@@ -1,0 +1,32 @@
+{
+  "name": "ai-soc-agent",
+  "version": "1.0.0",
+  "description": "AI-powered SOC investigation agent for a Zeek, Suricata, Wazuh, and MITRE MCP-based NIDS graduation project.",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "smoke": "tsx src/scripts/smoke.ts"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "helmet": "^8.1.0",
+    "pino": "^10.1.0",
+    "pino-http": "^11.0.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.0.1",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3"
+  }
+}

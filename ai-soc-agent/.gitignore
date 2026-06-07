@@ -1,0 +1,16 @@
+node_modules/
+dist/
+coverage/
+logs/
+*.log
+agent.out.log
+agent.err.log
+
+.env
+.env.*
+!.env.example
+
+.DS_Store
+.claude/
+.codex/
+.learnings/
