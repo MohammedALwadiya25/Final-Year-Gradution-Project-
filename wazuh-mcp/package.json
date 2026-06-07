@@ -4,9 +4,6 @@
   "description": "Modified Wazuh MCP server for the AI-powered SOC/NIDS graduation project.",
   "type": "module",
   "main": "dist/index.js",
-  "bin": {
-    "wazuh-mcp": "dist/index.js"
-  },
   "scripts": {
     "build": "tsup",
     "dev": "tsx watch src/index.ts",
@@ -14,8 +11,6 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "tsc --noEmit",
-    "pack:check": "npm pack --dry-run",
-    "prepublishOnly": "npm run build",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [
@@ -40,10 +35,5 @@
     "tsx": "^4.19.3",
     "typescript": "^6.0.3",
     "vitest": "^4.1.5"
-  },
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
-  ]
+  }
 }
