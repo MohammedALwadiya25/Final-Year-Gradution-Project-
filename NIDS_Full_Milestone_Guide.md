@@ -1,4 +1,60 @@
 # 🛡️ AI-Powered SOC Agent NIDS — Full Milestone & Configuration Guide
+# Critical Corrections for NIDS_Full_Milestone_Guide.md
+
+## ⚠️ DO NOT follow the original Milestone Guide blindly — it contains errors that will break your setup.
+
+## Correction 1: Zeek local.zeek Scripts
+| Milestone Guide Says | Correct (Your VM Has) |
+|---|---|
+| `@load policy/tuning/defaults` | Remove entirely — not in zeek-lts |
+| `@load policy/protocols/http/detect-sqli` | `@load protocols/http/detect-sql-injection` |
+| `@load policy/frameworks/notice/weird` | Remove entirely — wrong prefix |
+| `@load policy/misc/detect-traceroute` | Remove entirely — it's a directory |
+
+## Correction 2: NFS Export Must Use Tailscale IP
+- **WRONG:** `192.168.80.0/24` (LAN subnet — agent VM is on Tailscale overlay)
+- **CORRECT:** `100.64.0.2` (your Wazuh/agent VM Tailscale IP)
+
+## Correction 3: Zeek NFS Mount Path
+- **WRONG:** `/opt/zeek/logs` (contains symlink `current` that breaks over NFS)
+- **CORRECT:** `/opt/zeek/spool/zeek` (actual directory with live logs)
+
+## Correction 4: Wazuh Webhook Script
+- **WRONG:** Reads `sys.argv[3]` as file path
+- **CORRECT:** Reads `sys.argv[1]` as file path (Wazuh 4.x passes alert as argv[1])
+
+## Correction 5: Wazuh API Username
+- **WRONG:** `wazuh-admin`
+- **CORRECT:** `wazuh-wui`
+
+## Correction 6: Wazuh Correlation Rules Parent SID
+- **WRONG:** `31101`
+- **CORRECT:** `86601` (for Suricata EVE JSON in Wazuh 4.x)
+
+## Correction 7: Missing `_netdev` in /etc/fstab
+- **WRONG:** `defaults` (VM hangs on boot if Tailscale not ready)
+- **CORRECT:** `ro,noatime,nfsvers=4,_netdev`
+
+## Correction 8: Missing `build-essential`
+- Required for native npm modules (bcrypt, sqlite3, etc.)
+
+## Correction 9: `.env` in .gitignore
+- **CRITICAL:** Must add `.env` to `.gitignore` before first commit
+- Run: `git diff --cached | grep -iE "key|password|token|secret"` before EVERY push
+
+## Correction 10: n8n Webhook Path Consistency
+- Use `wazuh-alert` everywhere (not `soc-alert`)
+
+## Correction 11: Missing `no_root_squash` in NFS
+- Required or agent gets permission denied on log reads
+
+## Correction 12: Missing UFW Rule for rpcbind (Port 111)
+- `sudo ufw allow from 100.0.0.0/8 to any port 111`
+
+## Correction 13: Wazuh 4.14.5 Authentication
+- Wazuh API now requires **Bearer token** authentication
+- Basic Auth still works for getting the token, but API calls need `Authorization: Bearer &lt;token&gt;` header
+
 
 > **Project:** Design and Implementation of an AI-Powered SOC Agent Using MCP Servers for Intelligent Intrusion Detection and Automated Response in E-Commerce Environments  
 > **Stack:** pfSense · Zeek · Suricata · Wazuh · n8n · Google Gemini · MCP Servers  
