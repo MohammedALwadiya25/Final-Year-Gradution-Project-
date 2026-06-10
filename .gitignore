@@ -19,3 +19,4 @@ mitre-mcp/test-data/mitre-cache/
 # OS/editor files
 .DS_Store
 Thumbs.db
+.env

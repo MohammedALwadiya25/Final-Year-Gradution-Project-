@@ -300,7 +300,22 @@ export class GeminiSocReasoner {
     }
     
     evidence.push(`Rule-based fallback applied. Severity: ${severity}, Alert type: ${alertType}.`);
-
+    
+    if (severity >= 10) {
+      return socDecisionSchema.parse({
+        threat_confirmed: true,
+        confidence: 85,
+        action: "auto-block",
+        mitre_technique: mitreTechnique,
+        mitre_tactic: mitreTactic,
+        src_ip: request.src_ip,
+        threat_type: threatType,
+        evidence,
+        incident_report: `Critical severity ${alertType} alert from ${request.src_ip}. ${toolResults.length > 0 ? 'Some tool results were collected before Gemini API failure.' : 'No tool results available.'} Rule-based analysis with severity ${severity} triggers automatic blocking. MITRE: ${mitreTechnique} (${mitreTactic}).`,
+        recommended_block_duration: "24h",
+      });
+    }
+    
     if (severity >= 8) {
       return socDecisionSchema.parse({
         threat_confirmed: true,
