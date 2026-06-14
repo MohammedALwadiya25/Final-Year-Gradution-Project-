@@ -39,17 +39,8 @@ module.exports = {
       max_restarts: 10,
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
     },
-    {
-      name: 'wazuh-mcp',
-      cwd: './wazuh-mcp',
-      script: 'node',
-      args: 'dist/index.js',
-      env_file: './wazuh-mcp/.env', // create from .env.example
-      watch: false,
-      restart_delay: 3000,
-      max_restarts: 10,
-      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
-    },
+    // Wazuh removed — using direct sensor architecture
+    // alert-bridge.js runs on detection VM (192.168.80.11) instead
     {
       name: 'mitre-mcp',
       cwd: './mitre-mcp',

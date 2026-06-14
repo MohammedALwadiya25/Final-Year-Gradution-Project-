@@ -23,20 +23,9 @@ const envSchema = z.object({
   ZEEK_MCP_ARGS: z.string().default("../zeek-mcp/dist/index.js"),
   SURICATA_MCP_COMMAND: z.string().default("node"),
   SURICATA_MCP_ARGS: z.string().default("../suricata-mcp/dist/index.js"),
-  WAZUH_MCP_COMMAND: z.string().default("node"),
-  WAZUH_MCP_ARGS: z.string().default("../wazuh-mcp/dist/index.js"),
   MITRE_MCP_COMMAND: z.string().default("node"),
   MITRE_MCP_ARGS: z.string().default("../mitre-mcp/dist/index.js"),
   MITRE_MATRICES: z.string().default("enterprise"),
-  // Optional Wazuh config
-  WAZUH_URL: z.string().optional(),
-  WAZUH_USERNAME: z.string().optional(),
-  WAZUH_PASSWORD: z.string().optional(),
-  WAZUH_VERIFY_SSL: z.string().default("false"),
-  WAZUH_INDEXER_URL: z.string().optional(),
-  WAZUH_INDEXER_USERNAME: z.string().optional(),
-  WAZUH_INDEXER_PASSWORD: z.string().optional(),
-  WAZUH_INDEXER_VERIFY_SSL: z.string().default("false"),
 });
 
 function splitArgs(args: string): string[] {
@@ -94,22 +83,7 @@ export const config = {
           ZEEK_LOGS_DIR: process.env.ZEEK_LOGS_DIR ?? process.env.ZEEK_LOG_DIR ?? process.env.ZEEK_LOG_PATH,
         },
       },
-      {
-        id: "wazuh",
-        displayName: "Wazuh SIEM",
-        command: env.WAZUH_MCP_COMMAND,
-        args: splitArgs(env.WAZUH_MCP_ARGS),
-        env: {
-          WAZUH_URL: env.WAZUH_URL,
-          WAZUH_USERNAME: env.WAZUH_USERNAME,
-          WAZUH_PASSWORD: env.WAZUH_PASSWORD ?? process.env.WAZUH_PASS,
-          WAZUH_VERIFY_SSL: env.WAZUH_VERIFY_SSL,
-          WAZUH_INDEXER_URL: env.WAZUH_INDEXER_URL,
-          WAZUH_INDEXER_USERNAME: env.WAZUH_INDEXER_USERNAME,
-          WAZUH_INDEXER_PASSWORD: env.WAZUH_INDEXER_PASSWORD,
-          WAZUH_INDEXER_VERIFY_SSL: env.WAZUH_INDEXER_VERIFY_SSL,
-        },
-      },
+      // Wazuh removed — using direct sensor architecture (Suricata + Zeek)
       {
         id: "mitre",
         displayName: "MITRE ATT&CK",

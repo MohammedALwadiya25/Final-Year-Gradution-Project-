@@ -1,4 +1,4 @@
-# 🛡️ AI-Powered SOC Agent — NIDS for E-Commerce
+# AI-Powered SOC Agent — NIDS for E-Commerce
 
 [![CI](https://github.com/MohammedALwadiya25/Final-Year-Gradution-Project-/actions/workflows/ci.yml/badge.svg)](https://github.com/MohammedALwadiya25/Final-Year-Gradution-Project-/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -10,7 +10,7 @@
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
 - [Overview](#overview)
 - [Architecture](#architecture)
@@ -30,7 +30,7 @@
 
 This project builds a **5-layer AI-powered Network Intrusion Detection System (NIDS)** that replaces manual SOC triage with an intelligent reasoning agent. When a threat alert fires, the agent:
 
-1. Queries four **MCP servers** (Zeek, Suricata, Wazuh, MITRE ATT&CK) for evidence via local stdio child processes
+1. Queries three **MCP servers** (Zeek, Suricata, MITRE ATT&CK) for evidence via local stdio child processes
 2. Applies **AI reasoning** (Google Gemini) to synthesize cross-sensor findings
 3. Maps the threat to a **MITRE ATT&CK technique**
 4. Returns a **structured JSON decision** with confidence score and recommended action
@@ -42,61 +42,60 @@ This project builds a **5-layer AI-powered Network Intrusion Detection System (N
 
 ## Architecture
 
-### 5-Layer Detection Pipeline
+### Direct-Sensor AI Agent Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        E-COMMERCE NETWORK                           │
-└────────────────────────────┬────────────────────────────────────────┘
-                             │ Traffic
-                             ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  LAYER 1 — CAPTURE                                                  │
-│  pfSense Firewall  →  SPAN mirror  →  Detection VM                  │
-└────────────────────────────┬────────────────────────────────────────┘
-                             │ Raw packets
-                    ┌────────┴────────┐
-                    ▼                 ▼
-┌───────────────────────┐  ┌──────────────────────┐
-│  LAYER 2 — DETECTION  │  │  LAYER 2 — DETECTION  │
-│  Zeek (Behavioral)    │  │  Suricata (Signature) │
-│  conn/dns/http/ssl    │  │  EVE JSON alerts      │
-└───────────┬───────────┘  └──────────┬───────────┘
-            └──────────┬──────────────┘
-                       ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  LAYER 3 — AGGREGATION                                              │
-│  Wazuh SIEM  →  Correlates alerts  →  Triggers webhook to n8n       │
-└────────────────────────────┬────────────────────────────────────────┘
-                             │ Correlated alert + src_ip
-                             ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  LAYER 4 — INTELLIGENCE  (this repo)                                │
-│                                                                     │
-│   AI SOC Agent  ←→  MCP Hub (stdio)                               │
-│   (Gemini LLM)       ├── zeek-mcp    (16 tools)                     │
-│                      ├── suricata-mcp (18 tools)                    │
-│                      ├── wazuh-mcp   (11 tools)                     │
-│                      └── mitre-mcp   (9 tools)                      │
-│                                                                     │
-│   Two-Phase Investigation:                                          │
-│   Fast Path  → Wazuh + MITRE  (~3s)   → confidence ≥80 or <40      │
-│   Deep Path  → All 4 servers  (~8s)   → confidence 40–79           │
-└────────────────────────────┬────────────────────────────────────────┘
-                             │ Validated JSON decision
-                             ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  LAYER 5 — RESPONSE                                                 │
-│  n8n SOAR  →  auto-block (pfSense)  /  analyst-review (Telegram)    │
-└─────────────────────────────────────────────────────────────────────┘
+ALERT ARRIVES
+      |
+      v
++------------------------------+
+|  Suricata EVE JSON Alert     |
+|  (signature-based detection) |
++-------------+----------------+
+              |
+      +-------+-------+
+      v               v
++----------+   +--------------+
+| Zeek Logs|   | alert-bridge |
+|(behavior)|   | (forwards to |
+|          |   |     n8n)     |
++-----+----+   +------+-------+
+      |               |
+      v               v
++------------------------------+
+|           n8n SOAR           |
+|  (extracts fields, calls AI  |
+|           Agent)             |
++---------------+--------------+
+                |
+                v
++-----------------------------------------------+
+|              AI SOC AGENT                     |
+|                                               |
+|  PHASE 1 — FAST PATH (~3s)                    |
+|  |-- suricata-mcp: query alerts, investigate  |
+|  |-- mitre-mcp: map technique                 |
+|                                               |
+|  PHASE 2 — DEEP PATH (~8s, confidence 40-79%)|
+|  |-- zeek-mcp: behavioral analysis            |
+|  |-- suricata-mcp: advanced analytics         |
+|                                               |
+|  DECISION: auto-block / analyst-review /      |
+|            monitor                            |
++-----------------------------------------------+
+                |
+    +-----------+-----------+
+    v           v           v
+pfSense    Telegram    Log File
+(block)    (alert)     (record)
 ```
 
 ### Agent Decision Logic
 
 | Confidence | Investigation Path | Action | Avg Latency |
 |---|---|---|---|
-| ≥ 80% | Fast (Wazuh + MITRE only) | `auto-block` | ~3 s |
-| 40 – 79% | Deep (all 4 MCP servers) | `analyst-review` | ~8 s |
+| >= 80% | Fast (Suricata + MITRE only) | `auto-block` | ~3 s |
+| 40 – 79% | Deep (all 3 MCP servers) | `analyst-review` | ~8 s |
 | < 40% | Fast | `monitor` | ~3 s |
 
 ---
@@ -105,7 +104,7 @@ This project builds a **5-layer AI-powered Network Intrusion Detection System (N
 
 ```
 Final-Year-Gradution-Project-/
-├── ai-soc-agent/           # 🤖 AI reasoning agent (Layer 4)
+├── ai-soc-agent/           # AI reasoning agent (Layer 4)
 │   ├── src/
 │   │   ├── server.ts       #   Express HTTP server + /investigate endpoint
 │   │   ├── services/
@@ -121,11 +120,11 @@ Final-Year-Gradution-Project-/
 │   │   └── types.ts        #   Zod-validated decision schema
 │   └── .env.example
 │
-├── zeek-mcp/               # 🦎 Zeek behavioral analysis (16 tools)
-├── suricata-mcp/           # 🔥 Suricata signature IDS (18 tools)
-├── wazuh-mcp/              # 🛡️  Wazuh SIEM aggregation (11 tools)
-├── mitre-mcp/              # 🎯 MITRE ATT&CK intelligence (9 tools)
+├── zeek-mcp/               # Zeek behavioral analysis (16 tools)
+├── suricata-mcp/           # Suricata signature IDS (18 tools)
+├── mitre-mcp/              # MITRE ATT&CK intelligence (9 tools)
 │
+├── alert-bridge.js         # Suricata -> n8n alert forwarder
 ├── docs/
 │   └── architecture.md     # Detailed architecture documentation
 │
@@ -133,7 +132,7 @@ Final-Year-Gradution-Project-/
 ├── CONTRIBUTING.md
 ├── SECURITY.md
 ├── CHANGELOG.md
-└── README.md               # ← you are here
+└── README.md               # <- you are here
 ```
 
 ---
@@ -145,8 +144,8 @@ Final-Year-Gradution-Project-/
 | [ai-soc-agent](./ai-soc-agent/) | AI reasoning + orchestration | — | TypeScript, Gemini, Express |
 | [zeek-mcp](./zeek-mcp/) | Behavioral network analysis | 16 | TypeScript, MCP SDK |
 | [suricata-mcp](./suricata-mcp/) | Signature-based IDS alerts | 18 | TypeScript, MCP SDK |
-| [wazuh-mcp](./wazuh-mcp/) | SIEM event aggregation | 11 | TypeScript, MCP SDK |
 | [mitre-mcp](./mitre-mcp/) | Threat intelligence (ATT&CK) | 9 | TypeScript, MCP SDK |
+| [alert-bridge.js](./alert-bridge.js) | Suricata EVE -> n8n forwarder | — | Node.js |
 
 ---
 
@@ -171,7 +170,6 @@ cd Final-Year-Gradution-Project-
 # Build each MCP server (required before starting the AI agent)
 cd zeek-mcp      && npm install && npm run build && cd ..
 cd suricata-mcp  && npm install && npm run build && cd ..
-cd wazuh-mcp     && npm install && npm run build && cd ..
 cd mitre-mcp     && npm install && npm run build && cd ..
 ```
 
@@ -182,7 +180,6 @@ cd ai-soc-agent
 cp .env.example .env
 # Edit .env:
 #   GEMINI_API_KEY=<your Google AI Studio key>
-#   WAZUH_URL, WAZUH_USERNAME, WAZUH_PASSWORD (your Wazuh instance)
 npm install
 npm run build
 npm start
@@ -231,7 +228,6 @@ Expected response:
 # Test all packages
 cd zeek-mcp     && npm test   # 110 tests
 cd suricata-mcp && npm test   # 158 tests
-cd wazuh-mcp    && npm test
 cd mitre-mcp    && npm test
 ```
 
@@ -246,11 +242,10 @@ The full lab environment is documented in [`NIDS_Full_Milestone_Guide.md`](./NID
 | VM | Location | OS | IP | Role |
 |---|---|---|---|---|
 | pfSense | VMware | pfSense 2.7 | `192.168.80.10` | Firewall / VLAN / SPAN |
-| Zeek + Suricata | VMware | Ubuntu 22.04 | `192.168.80.11` | Detection engines |
+| Zeek + Suricata | VMware | Ubuntu 22.04 | `192.168.80.11` | Detection engines + alert-bridge |
 | AI SOC Agent | VMware | Ubuntu 22.04 | `192.168.80.12` | Node.js stdio MCP client |
 | DVWA | VMware | Ubuntu 22.04 | `192.168.80.13` | Attack target (DMZ) |
 | Windows Client | VMware | Windows 10 | `192.168.80.14` | Insider threat simulation |
-| Wazuh | Azure | Ubuntu 22.04 | `100.64.0.2` | SIEM |
 | n8n + AI Agent | Azure | Ubuntu 22.04 | `100.64.0.3` | SOAR + AI Agent |
 | Kali Linux | Azure | Kali 2024 | `100.64.0.4` | Attacker |
 
@@ -262,7 +257,7 @@ Hybrid connectivity uses **Tailscale** (WireGuard mesh) — the laptop advertise
 
 | Threat | Detection Source | MITRE Technique | Agent Path |
 |---|---|---|---|
-| SSH Brute Force | Zeek SSH + Suricata SID 9000001 + Wazuh rule 100001 | T1110.001 | Fast |
+| SSH Brute Force | Zeek SSH + Suricata SID 9000001 | T1110.001 | Fast |
 | SQL Injection | Suricata SID 9000002 + Zeek HTTP | T1190 | Fast |
 | DDoS SYN Flood | Suricata SID 9000003 | T1498 | Fast |
 | C2 DNS Beaconing | Zeek beaconing + Suricata SID 9000004 | T1071.004 | Deep |
@@ -276,13 +271,13 @@ Hybrid connectivity uses **Tailscale** (WireGuard mesh) — the laptop advertise
 
 | Metric | Target | Achieved |
 |---|---|---|
-| Detection Rate (DR) | ≥ 80% | TBD |
-| False Positive Rate (FPR) | ≤ 15% | TBD |
-| Mean Time to Detect (MTTD) | ≤ 60 s | TBD |
-| Mean Time to Respond (MTTR) | ≤ 30 s | TBD |
-| Agent Accuracy | ≥ 85% | TBD |
-| Fast-path latency | ≤ 5 000 ms | TBD |
-| Deep-path latency | ≤ 15 000 ms | TBD |
+| Detection Rate (DR) | >= 80% | TBD |
+| False Positive Rate (FPR) | <= 15% | TBD |
+| Mean Time to Detect (MTTD) | <= 60 s | TBD |
+| Mean Time to Respond (MTTR) | <= 30 s | TBD |
+| Agent Accuracy | >= 85% | TBD |
+| Fast-path latency | <= 5 000 ms | TBD |
+| Deep-path latency | <= 15 000 ms | TBD |
 
 ---
 
@@ -290,14 +285,13 @@ Hybrid connectivity uses **Tailscale** (WireGuard mesh) — the laptop advertise
 
 | Document | Description |
 |---|---|
-| [`NIDS_Full_Milestone_Guide.md`](./NIDS_Full_Milestone_Guide.md) | Complete 12-week build guide (infrastructure → attacks) |
+| [`NIDS_Full_Milestone_Guide.md`](./NIDS_Full_Milestone_Guide.md) | Complete 12-week build guide (infrastructure -> attacks) |
 | [`PROJECT_EVALUATION.md`](./PROJECT_EVALUATION.md) | Full code and architecture evaluation with findings |
 | [`docs/architecture.md`](./docs/architecture.md) | In-depth architecture with design rationale |
 | [`docs/deployment.md`](./docs/deployment.md) | Lab, Docker Compose, and production deployment |
 | [`ai-soc-agent/README.md`](./ai-soc-agent/README.md) | Agent setup, API reference, response schema |
 | [`zeek-mcp/README.md`](./zeek-mcp/README.md) | Zeek MCP: 16 tools, configuration, test data |
 | [`suricata-mcp/README.md`](./suricata-mcp/README.md) | Suricata MCP: 18 tools, EVE JSON parser |
-| [`wazuh-mcp/README.md`](./wazuh-mcp/README.md) | Wazuh MCP: 11 tools, dual-API design |
 | [`mitre-mcp/README.md`](./mitre-mcp/README.md) | MITRE MCP: 9 tools, offline STIX cache |
 
 ---
@@ -316,6 +310,6 @@ Please report vulnerabilities privately. See [SECURITY.md](./SECURITY.md) for th
 
 ## License
 
-MIT © Mohammed ALwadiya — see [LICENSE](./LICENSE) for details.
+MIT (c) Mohammed ALwadiya — see [LICENSE](./LICENSE) for details.
 
 > **Academic Use:** This project was developed as a final-year graduation project. Component code (MCP servers) is released under MIT and may be used independently.

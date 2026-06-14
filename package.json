@@ -6,7 +6,6 @@
   "workspaces": [
     "zeek-mcp",
     "suricata-mcp",
-    "wazuh-mcp",
     "mitre-mcp",
     "ai-soc-agent"
   ],
@@ -20,9 +19,9 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "clean": "npm run clean --workspaces --if-present 2>/dev/null; rm -rf */dist */node_modules",
     "setup": "bash scripts/setup.sh",
-    "build:mcp": "npm run build --workspace=zeek-mcp --workspace=suricata-mcp --workspace=wazuh-mcp --workspace=mitre-mcp",
+    "build:mcp": "npm run build --workspace=zeek-mcp --workspace=suricata-mcp --workspace=mitre-mcp",
     "build:agent": "npm run build --workspace=ai-soc-agent",
-    "test:mcp": "npm run test --workspace=zeek-mcp --workspace=suricata-mcp --workspace=wazuh-mcp --workspace=mitre-mcp",
+    "test:mcp": "npm run test --workspace=zeek-mcp --workspace=suricata-mcp --workspace=mitre-mcp",
     "health": "curl -s http://localhost:3000/health | python3 -m json.tool"
   },
   "keywords": [
@@ -33,7 +32,6 @@
     "security",
     "zeek",
     "suricata",
-    "wazuh",
     "mitre-attack",
     "thesis"
   ],
